@@ -1,0 +1,21 @@
+{
+  "name": "hkjc_dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev:backend": "npm --workspace apps/backend run dev",
+    "dev:frontend": "npm --workspace apps/frontend run dev",
+    "start:scraper": "npm --workspace services/scraper run start",
+    "scraper:historical": "npm --workspace services/scraper run historical",
+    "scraper:horse-details": "npm --workspace services/scraper run horse-details",
+    "start:recommender": "npm --workspace services/recommender run start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}

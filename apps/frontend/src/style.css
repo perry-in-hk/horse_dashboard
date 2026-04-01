@@ -1,0 +1,402 @@
+/* === Reset & base ========================================================= */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* === Topbar =============================================================== */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 0 24px;
+  height: 56px;
+  background: #1e293b;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.topbar-title {
+  font-size: 18px;
+  font-weight: 700;
+  white-space: nowrap;
+  margin: 0;
+}
+
+.tab-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.tab-link {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #94a3b8;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab-link:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+}
+
+.tab-link.active {
+  background: #334155;
+  color: #f8fafc;
+}
+
+/* === Page content ========================================================= */
+.page-content {
+  flex: 1;
+  padding: 24px;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* === Cards & panels ======================================================= */
+.card {
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+/* === Grid helpers ========================================================= */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.full-span {
+  grid-column: 1 / -1;
+}
+
+/* === Stat pill ============================================================ */
+.stat-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.stat-pill {
+  background: #334155;
+  border-radius: 8px;
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-pill .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.stat-pill .value {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+/* === Controls bar ========================================================= */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.controls label {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.controls input,
+.controls select {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.select-horse {
+  min-width: 280px;
+  max-width: min(100%, 440px);
+}
+
+.controls input:focus,
+.controls select:focus {
+  outline: none;
+  border-color: #60a5fa;
+}
+
+.btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-primary {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #2563eb;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #334155;
+}
+
+.btn-ghost:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+}
+
+/* === Tables =============================================================== */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.data-table th {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  position: sticky;
+  top: 0;
+  background: #1e293b;
+}
+
+.data-table tr:hover td {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.champion td {
+  color: #fbbf24;
+}
+
+/* === Horse cards grid ===================================================== */
+.horse-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.horse-card {
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.horse-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.horse-card-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.horse-card-score {
+  font-size: 28px;
+  font-weight: 800;
+  color: #60a5fa;
+}
+
+.horse-card-meta {
+  font-size: 12px;
+  color: #94a3b8;
+  display: flex;
+  gap: 14px;
+}
+
+/* === Stub page ============================================================ */
+.stub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  gap: 12px;
+}
+
+.stub h2 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.stub p {
+  color: #64748b;
+  font-size: 15px;
+  margin: 0;
+}
+
+/* === DB browser =========================================================== */
+.table-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.table-list-item {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.table-list-item:hover {
+  border-color: #334155;
+}
+
+.table-list-item.selected {
+  border-color: #3b82f6;
+  background: #1e3a5f;
+}
+
+.table-list-item .tname {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.table-list-item .tcount {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* === Scrollable table wrapper ============================================= */
+.table-scroll {
+  overflow-x: auto;
+  max-height: 520px;
+  overflow-y: auto;
+  border-radius: 8px;
+}
+
+/* === Chart wrapper ======================================================== */
+.chart-wrapper {
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 16px;
+  min-height: 360px;
+}
+
+/* === Search input ========================================================= */
+.search-box {
+  position: relative;
+}
+
+.search-box input {
+  width: 220px;
+}
+
+.search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 40;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  width: 300px;
+  margin-top: 4px;
+}
+
+.search-results .sr-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.search-results .sr-item:hover {
+  background: #334155;
+}
+
+/* === Responsive =========================================================== */
+@media (max-width: 768px) {
+  .grid-2,
+  .grid-3 {
+    grid-template-columns: 1fr;
+  }
+  .horse-cards {
+    grid-template-columns: 1fr;
+  }
+}
