@@ -7,6 +7,7 @@ import { pool } from "./db.js";
 import { runMigrations } from "./migrate.js";
 import analyticsRouter from "./routes/analytics.js";
 import dbRouter from "./routes/db.js";
+import scraperRouter from "./routes/scraper.js";
 
 const app = express();
 app.use(helmet());
@@ -25,6 +26,7 @@ app.use("/api", (req, res, next) => {
 
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/db", dbRouter);
+app.use("/api/scraper", scraperRouter);
 
 app.get("/health", async (_, res) => {
   await pool.query("SELECT 1");
