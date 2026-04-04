@@ -4,6 +4,8 @@ import Compare from "./pages/Compare.tsx";
 import Database from "./pages/Database.tsx";
 import Stub from "./pages/Stub.tsx";
 import Scraper from "./pages/Scraper.tsx";
+import Realtime from "./pages/Realtime.tsx";
+import Settings from "./pages/Settings.tsx";
 
 const tabs = [
   { to: "/analysis", label: "Analysis" },
@@ -12,6 +14,7 @@ const tabs = [
   { to: "/scraper", label: "Scraper" },
   { to: "/realtime", label: "Realtime" },
   { to: "/ai", label: "AI Recommendation" },
+  { to: "/settings", label: "Settings" },
 ] as const;
 
 export default function App() {
@@ -34,8 +37,9 @@ export default function App() {
           <Route path="/compare" element={<Compare />} />
           <Route path="/database" element={<Database />} />
           <Route path="/scraper" element={<Scraper />} />
-          <Route path="/realtime" element={<Stub title="Realtime Dashboard" />} />
+          <Route path="/realtime" element={<Realtime />} />
           <Route path="/ai" element={<Stub title="AI Recommendation" />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/analysis" replace />} />
         </Routes>
       </main>

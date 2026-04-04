@@ -276,3 +276,22 @@ CREATE OR REPLACE VIEW hkjc_merged_race_data AS
       AND hkjc_parse_history_race_date(h.race_date) IS NOT NULL
       AND r.race_date = hkjc_parse_history_race_date(h.race_date)
   );
+
+-- Live odds snapshots from HKJC GraphQL (worker poll + hash dedup)
+CREATE TABLE IF NOT EXISTS hkjc_odds_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  meeting_date DATE NOT NULL,
+  venue_code TEXT NOT NULL,
+  race_no INT NOT NULL,
+  odds_types TEXT[] NOT NULL,
+  payload_hash TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  source TEXT NOT NULL DEFAULT 'hkjc_graphql'
+);
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_odds_snapshots_lookup
+  ON hkjc_odds_snapshots (meeting_date, venue_code, race_no, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_odds_snapshots_dedup
+  ON hkjc_odds_snapshots (meeting_date, venue_code, race_no, odds_types);

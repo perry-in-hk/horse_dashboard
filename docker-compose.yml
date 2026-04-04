@@ -38,6 +38,14 @@ services:
     container_name: hkjc-backend
     env_file:
       - .env
+    environment:
+      # Hostname `postgres` is the DB service on the Compose network (see .env.example).
+      SCRAPER_ROOT: /app/services/scraper
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ODDS_SYNC_ENABLED: ${ODDS_SYNC_ENABLED:-true}
+      ODDS_SYNC_INTERVAL_MS: ${ODDS_SYNC_INTERVAL_MS:-10000}
+      ODDS_SYNC_ODDS_TYPES: ${ODDS_SYNC_ODDS_TYPES:-WIN,PLA}
     ports:
       - "4000:4000"
     depends_on:
@@ -56,6 +64,9 @@ services:
     container_name: hkjc-frontend
     env_file:
       - .env
+    environment:
+      # Browser on your machine calls the mapped backend port (not the container hostname).
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
     ports:
       - "5173:5173"
     depends_on:

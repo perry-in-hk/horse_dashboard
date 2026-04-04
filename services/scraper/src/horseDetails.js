@@ -44,21 +44,84 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function loadHorseCodes() {
+/** Comma/whitespace-separated codes from env (e.g. API spawn). */
+function parseHorseCodesEnv() {
+  const raw = process.env.SCRAPER_HORSE_CODES;
+  if (!raw || !String(raw).trim()) return [];
+  const seen = new Set();
+  const out = [];
+  for (const part of String(raw).split(/[\s,]+/)) {
+    const t = part.trim().toUpperCase();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+async function loadHorseCodesFromFile() {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const filePath = path.resolve(__dirname, "../../../horse_codes_unique.txt");
   const text = await readFile(filePath, "utf-8");
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim().toUpperCase();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+async function loadHorseCodesFromDb() {
+  const { rows } = await getPool().query(
+    `SELECT DISTINCT horse_code
+     FROM hkjc_horse_race_history
+     WHERE horse_code IS NOT NULL AND trim(horse_code) <> ''
+     ORDER BY horse_code`
+  );
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const t = String(r.horse_code).trim().toUpperCase();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * 1) SCRAPER_HORSE_CODES non-empty → explicit list
+ * 2) SCRAPER_HORSE_CODES_SOURCE=file → horse_codes_unique.txt
+ * 3) else (db / unset / other) → DISTINCT horse_code from hkjc_horse_race_history
+ */
+async function resolveHorseCodes() {
+  const explicit = parseHorseCodesEnv();
+  if (explicit.length > 0) {
+    console.log(`Horse code source: SCRAPER_HORSE_CODES (${explicit.length} codes)`);
+    return explicit;
+  }
+  if (process.env.SCRAPER_HORSE_CODES_SOURCE === "file") {
+    const codes = await loadHorseCodesFromFile();
+    console.log(`Horse code source: horse_codes_unique.txt (${codes.length} codes)`);
+    return codes;
+  }
+  const codes = await loadHorseCodesFromDb();
+  console.log(
+    `Horse code source: hkjc_horse_race_history DISTINCT (${codes.length} codes)`
+  );
+  return codes;
 }
 
 async function getAlreadyScrapedCodes() {
   const { rows } = await getPool().query(
     `SELECT horse_code FROM hkjc_horse_details`
   );
-  return new Set(rows.map((r) => r.horse_code));
+  return new Set(
+    rows.map((r) => String(r.horse_code ?? "").trim().toUpperCase()).filter(Boolean)
+  );
 }
 
 /**
@@ -132,8 +195,15 @@ async function main() {
     );
   }
 
-  let codes = await loadHorseCodes();
-  console.log(`Loaded ${codes.length} horse codes from file`);
+  let codes = await resolveHorseCodes();
+
+  if (codes.length === 0) {
+    console.log(
+      "No horse codes to process (empty explicit list, file, or hkjc_horse_race_history)."
+    );
+    await closePool();
+    return;
+  }
 
   if (SKIP_SCRAPED) {
     const scraped = await getAlreadyScrapedCodes();
@@ -148,7 +218,9 @@ async function main() {
   }
 
   if (codes.length === 0) {
-    console.log("All horses already scraped. Nothing to do.");
+    console.log(
+      "All horses in the list are already in hkjc_horse_details (skip mode). Nothing to do."
+    );
     await closePool();
     return;
   }

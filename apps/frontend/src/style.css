@@ -199,6 +199,34 @@ body {
   color: #e2e8f0;
 }
 
+.btn-secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.btn-secondary:hover {
+  background: #475569;
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.muted {
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.error-text {
+  color: #f87171;
+  font-size: 14px;
+}
+
 /* === Tables =============================================================== */
 .data-table {
   width: 100%;
@@ -270,6 +298,112 @@ body {
   color: #94a3b8;
   display: flex;
   gap: 14px;
+}
+
+/* === Settings / infrastructure mindmap ====================================== */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-intro .card-title {
+  margin-bottom: 8px;
+}
+
+.settings-infra-lead {
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 0 0 20px;
+  max-width: 72ch;
+}
+
+.settings-infra-note {
+  margin-top: -8px;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.settings-legend {
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+
+.settings-legend-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: #e2e8f0;
+}
+
+.settings-legend-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.6;
+}
+
+.settings-legend-list li {
+  margin-bottom: 6px;
+}
+
+.settings-legend-list li:last-child {
+  margin-bottom: 0;
+}
+
+.settings-diagram-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.settings-diagram-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-diagram-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: #f1f5f9;
+}
+
+.settings-diagram-caption {
+  font-size: 12px;
+  margin: 4px 0 0;
+  max-width: 72ch;
+}
+
+.settings-inline-code {
+  font-size: 12px;
+  background: #0f172a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #334155;
+}
+
+.settings-mindmap-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 0 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-mindmap-svg {
+  display: flex;
+  justify-content: center;
+  min-height: 280px;
+}
+
+.settings-mindmap-svg svg {
+  max-width: 100%;
+  height: auto;
 }
 
 /* === Stub page ============================================================ */
@@ -388,6 +522,108 @@ body {
 
 .search-results .sr-item:hover {
   background: #334155;
+}
+
+/* === Realtime auto-sync strip ============================================= */
+.realtime-auto-sync {
+  padding: 14px 18px;
+}
+
+.realtime-auto-sync-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.realtime-auto-sync-main {
+  flex: 1;
+  min-width: min(100%, 220px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+}
+
+.realtime-auto-sync-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.realtime-auto-sync-desc {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.realtime-auto-sync-race {
+  font-size: 14px;
+  font-weight: 500;
+  color: #93c5fd;
+}
+
+.realtime-auto-sync-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a5b4fc;
+}
+
+.realtime-auto-sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.35);
+  animation: realtime-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes realtime-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.realtime-auto-sync-stop {
+  flex-shrink: 0;
+}
+
+.realtime-interval-races {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: min(100%, 240px);
+}
+
+.realtime-interval-races-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.realtime-interval-race-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #cbd5e1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.realtime-interval-race-check input {
+  accent-color: #3b82f6;
 }
 
 /* === Responsive =========================================================== */

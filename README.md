@@ -36,25 +36,37 @@ Use header `x-api-key: dev-hkjc-key` for API requests.
 
 Batch scraper that fetches HKJC race results (local ST/HV) via Firecrawl and stores them in the database. Requires Firecrawl CLI to be installed and authenticated (`firecrawl login --browser`).
 
-Run all configured dates:
+**Default (modern mode):** scrapes only the dates in `SCRAPER_DATES` (comma-separated `YYYY-MM-DD`), or if unset, the **most recent Wednesday and Sunday strictly before today** in `Asia/Hong_Kong`. If the database already has any rows for a target date in `hkjc_race_results`, `hkjc_dividends`, or `hkjc_local_race_events`, the API/UI returns **409** and the job does not start (CLI with `SCRAPER_STRICT_NO_DUPLICATE=true` exits with an error).
 
 ```bash
-npm run scraper:historical
+SCRAPER_DATES=2026-04-02,2026-04-05 npm run scraper:historical
 ```
 
-Filter to a date range via env vars:
+**Legacy mode** (full static date list in `services/scraper` plus optional range filters and skip-already-scraped):
 
 ```bash
-SCRAPER_START_DATE=2026-01-01 SCRAPER_END_DATE=2026-01-31 npm run scraper:historical
+SCRAPER_USE_LEGACY_TARGET_LIST=true SCRAPER_START_DATE=2026-01-01 SCRAPER_END_DATE=2026-01-31 npm run scraper:historical
 ```
 
-Control parallelism with `SCRAPER_CONCURRENCY` (default 2).
+The dashboard **Scraper** page can pass optional race dates; leaving them blank uses the same HK Wed/Sun default.
+
+Control parallelism with `SCRAPER_CONCURRENCY` (default 2). The backend Docker image includes `services/scraper` so `/api/scraper/run` can execute `historical.js` inside the `backend` container (`SCRAPER_ROOT=/app/services/scraper` in Compose).
 
 Historical data is stored in 3 dedicated tables:
 
 - `hkjc_race_results` — one row per horse per race (position, weight, margin, time, odds)
 - `hkjc_dividends` — one row per pool+combination per race (win, place, quinella, etc.)
 - `hkjc_local_race_events` — stewards/event report per horse (local races only)
+
+## Horse details scraper
+
+Fetches HKJC horse profile pages and upserts `hkjc_horse_details` and `hkjc_horse_race_history`.
+
+- **Explicit codes:** set `SCRAPER_HORSE_CODES` (comma-separated) or pass `horseCodes` from the **Scraper** UI.
+- **Default (all):** if `SCRAPER_HORSE_CODES` is unset and `SCRAPER_HORSE_CODES_SOURCE` is not `file`, the code list is **`SELECT DISTINCT horse_code FROM hkjc_horse_race_history`** (excluding empty values).
+- **Legacy file list:** `SCRAPER_HORSE_CODES_SOURCE=file` uses `services/scraper/horse_codes_unique.txt` (same as older CLI behavior).
+
+Skip/resume is controlled with `SCRAPER_HORSE_DETAILS_SKIP_SCRAPED` (horses already present in `hkjc_horse_details` are skipped unless you use `--refresh` / full refresh scripts).
 
 ## Data Schema
 

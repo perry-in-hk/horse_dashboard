@@ -3,6 +3,12 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { pool } from "../db.js";
+import {
+  defaultWedSunIsoHk,
+  normalizeHistoricalIsoDates,
+} from "../lib/scraperDates.js";
+import { normalizeHorseCodes } from "../lib/horseCodes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCRAPER_ROOT = path.join(__dirname, "../../../../services/scraper");
@@ -31,7 +37,7 @@ function appendLine(mapKey, line) {
   if (entry.logs.length > MAX_LOG_LINES) entry.logs.splice(0, entry.logs.length - MAX_LOG_LINES);
 }
 
-function runScript(key) {
+function runScript(key, extraEnv = {}) {
   const rel = SCRIPTS[key];
   const root = scraperRoot();
   const scriptPath = path.join(root, rel);
@@ -42,7 +48,7 @@ function runScript(key) {
 
   const child = spawn(process.execPath, [scriptPath], {
     cwd: root,
-    env: { ...process.env },
+    env: { ...process.env, ...extraEnv },
     windowsHide: true,
   });
 
@@ -75,6 +81,24 @@ function runScript(key) {
   });
 }
 
+/** @param {string[]} isoDates YYYY-MM-DD */
+async function findConflictingRaceDates(isoDates) {
+  if (isoDates.length === 0) return [];
+  const { rows } = await pool.query(
+    `SELECT DISTINCT race_date::text AS d
+     FROM (
+       SELECT race_date FROM hkjc_race_results WHERE race_date = ANY($1::date[])
+       UNION
+       SELECT race_date FROM hkjc_dividends WHERE race_date = ANY($1::date[])
+       UNION
+       SELECT race_date FROM hkjc_local_race_events WHERE race_date = ANY($1::date[])
+     ) x
+     ORDER BY d`,
+    [isoDates]
+  );
+  return rows.map((r) => r.d);
+}
+
 const router = express.Router();
 
 router.get("/status", (_req, res) => {
@@ -97,19 +121,52 @@ router.get("/status", (_req, res) => {
   res.json(payload);
 });
 
-router.post("/run", express.json(), (req, res) => {
+router.post("/run", express.json(), async (req, res) => {
   const key = req.body?.script;
   if (key !== "historical" && key !== "horse-details") {
     return res.status(400).json({
-      error: 'Body must be JSON: { "script": "historical" | "horse-details" }',
+      error:
+        'Body must be JSON: { "script": "historical" | "horse-details", "dates"?: string[], "horseCodes"?: string[] }',
     });
   }
   if (active.has(key)) {
     return res.status(409).json({ error: `Already running: ${key}` });
   }
 
+  let extraEnv = {};
+  if (key === "historical") {
+    const isoDates = normalizeHistoricalIsoDates(req.body?.dates);
+    const resolved = isoDates.length ? isoDates : defaultWedSunIsoHk();
+    try {
+      const conflicting = await findConflictingRaceDates(resolved);
+      if (conflicting.length) {
+        return res.status(409).json({
+          error:
+            "Data already exists for one or more race dates. Remove rows or pick other dates.",
+          conflictingDates: conflicting,
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return res.status(500).json({ error: msg });
+    }
+    extraEnv = {
+      SCRAPER_DATES: resolved.join(","),
+      SCRAPER_STRICT_NO_DUPLICATE: "true",
+      SCRAPER_USE_LEGACY_TARGET_LIST: "false",
+    };
+  } else if (key === "horse-details") {
+    const horseCodes = normalizeHorseCodes(req.body?.horseCodes);
+    if (horseCodes.length > 0) {
+      extraEnv = { SCRAPER_HORSE_CODES: horseCodes.join(",") };
+    } else {
+      // Clear any inherited list; force DB distinct codes (override .env file source).
+      extraEnv = { SCRAPER_HORSE_CODES: "", SCRAPER_HORSE_CODES_SOURCE: "db" };
+    }
+  }
+
   try {
-    runScript(key);
+    runScript(key, extraEnv);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return res.status(500).json({ error: msg });

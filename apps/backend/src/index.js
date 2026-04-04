@@ -8,6 +8,8 @@ import { runMigrations } from "./migrate.js";
 import analyticsRouter from "./routes/analytics.js";
 import dbRouter from "./routes/db.js";
 import scraperRouter from "./routes/scraper.js";
+import realtimeRouter from "./routes/realtime.js";
+import { startOddsSyncWorker } from "./oddsSyncWorker.js";
 
 const app = express();
 app.use(helmet());
@@ -27,6 +29,7 @@ app.use("/api", (req, res, next) => {
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/db", dbRouter);
 app.use("/api/scraper", scraperRouter);
+app.use("/api/realtime", realtimeRouter);
 
 app.get("/health", async (_, res) => {
   await pool.query("SELECT 1");
@@ -36,6 +39,7 @@ app.get("/health", async (_, res) => {
 const port = Number(process.env.PORT ?? 4000);
 const server = app.listen(port, async () => {
   await runMigrations();
+  startOddsSyncWorker();
   console.log(`Backend listening on ${port}`);
 });
 
