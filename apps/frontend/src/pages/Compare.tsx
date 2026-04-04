@@ -26,6 +26,9 @@ interface RaceRow {
   declared_weight: number | null;
   margin: string | null;
   running_positions: string | null;
+  race_distance: number | null;
+  time_seconds: number | null;
+  speed_mps: number | null;
   position_int: number | null;
   race_score: number;
 }
@@ -217,6 +220,87 @@ export default function Compare() {
     };
   }, [data]);
 
+  /* Average speed by race distance (grouped bars) */
+  const speedByDistanceChart = useMemo(() => {
+    if (!data.length) return null;
+    const distSet = new Set<number>();
+    for (const h of data) {
+      for (const r of h.rows) {
+        if (r.race_distance != null && r.speed_mps != null) distSet.add(Number(r.race_distance));
+      }
+    }
+    const distances = Array.from(distSet).sort((a, b) => a - b);
+    if (distances.length === 0) return null;
+    const categories = distances.map((d) => `${d}m`);
+
+    const series = data.map((h, i) => {
+      const byDist = new Map<number, number[]>();
+      for (const r of h.rows) {
+        if (r.race_distance == null || r.speed_mps == null) continue;
+        const d = Number(r.race_distance);
+        if (!byDist.has(d)) byDist.set(d, []);
+        byDist.get(d)!.push(r.speed_mps);
+      }
+      return {
+        name: `${h.horse_name} (${h.horse_code})`,
+        type: "bar" as const,
+        emphasis: { focus: "series" as const },
+        itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+        data: distances.map((d) => {
+          const vals = byDist.get(d);
+          if (!vals?.length) return null;
+          const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
+          const value = Math.round(avg * 10000) / 10000;
+          return { value, n: vals.length, distanceM: d };
+        }),
+      };
+    });
+
+    return {
+      backgroundColor: "transparent",
+      tooltip: {
+        trigger: "axis" as const,
+        axisPointer: { type: "shadow" as const },
+        formatter: (params: unknown) => {
+          const ps = (Array.isArray(params) ? params : [params]) as {
+            axisValue?: string;
+            seriesName?: string;
+            data?: { value: number; n: number; distanceM: number } | null;
+            marker?: string;
+          }[];
+          const axis = ps[0]?.axisValue ?? "";
+          const lines = [axis];
+          for (const p of ps) {
+            const d = p.data;
+            if (d == null || typeof d !== "object" || d.value == null) continue;
+            lines.push(
+              `${p.marker ?? ""} ${p.seriesName ?? ""}: ${d.value} m/s (${d.n} start${d.n === 1 ? "" : "s"})`,
+            );
+          }
+          return lines.join("<br/>");
+        },
+      },
+      legend: { textStyle: { color: "#94a3b8" }, top: 0 },
+      grid: { left: 48, right: 16, top: 40, bottom: 48 },
+      xAxis: {
+        type: "category" as const,
+        data: categories,
+        name: "Distance",
+        nameTextStyle: { color: "#94a3b8" },
+        axisLabel: { color: "#94a3b8", fontSize: 11 },
+        axisLine: { lineStyle: { color: "#334155" } },
+      },
+      yAxis: {
+        type: "value" as const,
+        name: "m/s",
+        nameTextStyle: { color: "#94a3b8" },
+        axisLabel: { color: "#94a3b8" },
+        splitLine: { lineStyle: { color: "#1e293b" } },
+      },
+      series,
+    };
+  }, [data]);
+
   /* ── Render ─────────────────────────────────────────────────────────── */
 
   return (
@@ -378,13 +462,21 @@ export default function Compare() {
         </div>
       )}
 
-      {/* Speed by distance — Phase 2 placeholder */}
       {data.length > 0 && (
-        <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 32 }}>
-          <h3 className="card-title" style={{ margin: 0 }}>Average Speed by Race Distance</h3>
-          <p style={{ color: "#64748b", fontSize: 13, margin: "8px 0 0" }}>
-            Coming soon — requires race distance data (not yet in the database).
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h3 className="card-title">Average Speed by Race Distance</h3>
+          <p style={{ color: "#64748b", fontSize: 13, margin: "0 0 16px" }}>
+            Uses merged history distance and finish time. Races without a matched distance or parseable time are omitted.
           </p>
+          {speedByDistanceChart ? (
+            <div className="chart-wrapper">
+              <ReactECharts option={speedByDistanceChart} style={{ height: 360 }} />
+            </div>
+          ) : (
+            <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
+              No speed-by-distance data for the selected horses (need history distance and a valid finish time per start).
+            </p>
+          )}
         </div>
       )}
 

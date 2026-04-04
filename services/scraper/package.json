@@ -6,7 +6,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/index.js",
     "historical": "node src/historical.js",
-    "horse-details": "node src/horseDetails.js"
+    "horse-details": "node src/horseDetails.js",
+    "horse-details:refresh": "node src/horseDetails.js --refresh"
   },
   "keywords": [],
   "author": "",

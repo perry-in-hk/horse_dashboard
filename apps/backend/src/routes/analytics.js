@@ -4,6 +4,32 @@ import { pool } from "../db.js";
 const router = Router();
 
 /**
+ * Unified race row from hkjc_merged_race_data (local results + events + horse history).
+ * Prefer rr_* (official results); fill from hist_* for history_only / overseas rows.
+ */
+const MERGED_RACE_FLAT = `
+  SELECT
+    m.merge_source,
+    COALESCE(m.rr_race_date, hkjc_parse_history_race_date(m.hist_race_date)) AS race_date,
+    COALESCE(m.rr_racecourse, m.hist_venue_track) AS racecourse,
+    m.rr_race_no AS race_no,
+    COALESCE(m.rr_horse_code, m.hist_horse_code) AS horse_code,
+    COALESCE(m.rr_horse_name, m.hist_horse_name) AS horse_name,
+    COALESCE(m.rr_jockey, m.hist_jockey) AS jockey,
+    COALESCE(m.rr_trainer, m.hist_trainer) AS trainer,
+    COALESCE(m.rr_finish_position, m.hist_position) AS finish_position,
+    COALESCE(m.rr_finish_time, m.hist_finish_time) AS finish_time,
+    COALESCE(m.rr_win_odds, m.hist_win_odds) AS win_odds,
+    COALESCE(m.rr_draw, m.hist_draw) AS draw,
+    COALESCE(m.rr_actual_weight, m.hist_actual_weight) AS actual_weight,
+    COALESCE(m.rr_declared_weight, m.hist_declared_weight) AS declared_weight,
+    COALESCE(m.rr_margin, m.hist_lbw) AS margin,
+    COALESCE(m.rr_running_positions, m.hist_running_positions) AS running_positions,
+    m.hist_distance AS race_distance
+  FROM hkjc_merged_race_data m
+`;
+
+/**
  * Derived per-race score: inverted placement (14 - pos) blended with market
  * signal (100 / win_odds).  Transparent placeholder until a proper Part-I
  * ranking pipeline is wired in.
@@ -20,13 +46,31 @@ function parsePositionInt(raw) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** HKJC finish time text, e.g. "1:09.45" (min:sec) or plain seconds. */
+function parseFinishTimeSeconds(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.includes(":")) {
+    const parts = s.split(":");
+    if (parts.length < 2) return null;
+    const mins = parseInt(parts[0], 10);
+    const sec = parseFloat(parts.slice(1).join(":"));
+    if (!Number.isFinite(mins) || !Number.isFinite(sec)) return null;
+    const t = mins * 60 + sec;
+    return t > 0 ? t : null;
+  }
+  const t = parseFloat(s);
+  return Number.isFinite(t) && t > 0 ? t : null;
+}
+
 // ---- Horse list (dropdown; must be before /horses/:horseCode/history) -------
 
 router.get("/horses/list", async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit ?? 5000), 1), 8000);
   const { rows } = await pool.query(
     `SELECT horse_code, horse_name, COUNT(*)::int AS race_count
-     FROM hkjc_race_results
+     FROM (${MERGED_RACE_FLAT}) AS mr
      WHERE horse_code IS NOT NULL AND horse_name IS NOT NULL
      GROUP BY horse_code, horse_name
      ORDER BY horse_name ASC, horse_code ASC
@@ -44,9 +88,9 @@ router.get("/horses/:horseCode/history", async (req, res) => {
     `SELECT race_date, racecourse, race_no, horse_name, horse_code, jockey,
             trainer, finish_position, finish_time, win_odds, draw,
             actual_weight, declared_weight, margin, running_positions
-     FROM hkjc_race_results
+     FROM (${MERGED_RACE_FLAT}) AS mr
      WHERE horse_code = $1
-     ORDER BY race_date, race_no`,
+     ORDER BY race_date, race_no NULLS LAST`,
     [horseCode.toUpperCase()]
   );
 
@@ -97,7 +141,7 @@ router.get("/horses/search", async (req, res) => {
   const { rows } = await pool.query(
     `SELECT DISTINCT horse_code, horse_name,
             COUNT(*) OVER (PARTITION BY horse_code) AS race_count
-     FROM hkjc_race_results
+     FROM (${MERGED_RACE_FLAT}) AS mr
      WHERE horse_name ILIKE $1 OR horse_code ILIKE $1
      ORDER BY horse_name
      LIMIT 30`,
@@ -119,8 +163,8 @@ router.get("/jockey-performance", async (req, res) => {
               COUNT(*) FILTER (WHERE finish_position = '1')::int AS wins,
               COUNT(*) FILTER (WHERE finish_position IN ('1','2','3'))::int AS top3,
               ROUND(AVG(CASE WHEN win_odds IS NOT NULL THEN win_odds END), 2) AS avg_win_odds
-       FROM hkjc_race_results
-       WHERE jockey IS NOT NULL
+       FROM (${MERGED_RACE_FLAT}) AS mr
+       WHERE jockey IS NOT NULL AND trim(jockey) <> ''
        GROUP BY jockey
        HAVING COUNT(*) >= $1
      )
@@ -171,18 +215,27 @@ router.get("/horses/compare", async (req, res) => {
   const { rows } = await pool.query(
     `SELECT race_date, racecourse, race_no, horse_name, horse_code, jockey,
             trainer, finish_position, finish_time, win_odds, draw,
-            actual_weight, declared_weight, margin, running_positions
-     FROM hkjc_race_results
+            actual_weight, declared_weight, margin, running_positions, race_distance
+     FROM (${MERGED_RACE_FLAT}) AS mr
      WHERE horse_code = ANY($1::text[])
-     ORDER BY horse_code, race_date, race_no`,
+     ORDER BY horse_code, race_date, race_no NULLS LAST`,
     [codes]
   );
 
   const grouped = new Map();
   for (const r of rows) {
     const posInt = parsePositionInt(r.finish_position);
+    const dist = r.race_distance != null ? Number(r.race_distance) : null;
+    const timeSeconds = parseFinishTimeSeconds(r.finish_time);
+    const speedMps =
+      dist != null && dist > 0 && timeSeconds != null && timeSeconds > 0
+        ? Math.round((dist / timeSeconds) * 10000) / 10000
+        : null;
     const enriched = {
       ...r,
+      race_distance: dist,
+      time_seconds: timeSeconds,
+      speed_mps: speedMps,
       position_int: posInt,
       race_score: deriveRaceScore(posInt, r.win_odds ? Number(r.win_odds) : null),
     };

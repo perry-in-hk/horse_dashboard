@@ -12,7 +12,33 @@ import {
   upsertHorseRaceHistory,
 } from "./lib/db.js";
 
-const SKIP_SCRAPED = process.env.SCRAPER_SKIP_SCRAPED !== "false";
+const argv = process.argv.slice(2);
+/** CLI: --refresh | --all | --no-skip → re-scrape every horse (ignore DB skip). */
+const FORCE_REFRESH =
+  argv.includes("--refresh") ||
+  argv.includes("--all") ||
+  argv.includes("--no-skip");
+
+/**
+ * Skip horses already in hkjc_horse_details (resume).
+ * Env: SCRAPER_HORSE_DETAILS_SKIP_SCRAPED, or legacy SCRAPER_SKIP_SCRAPED if unset.
+ * Skip=true (default): true, 1, yes, on, or empty.
+ * Skip=false: false, 0, no, off, all, refresh, full, rescan.
+ */
+function envSaysSkipScraped() {
+  const raw =
+    process.env.SCRAPER_HORSE_DETAILS_SKIP_SCRAPED !== undefined
+      ? process.env.SCRAPER_HORSE_DETAILS_SKIP_SCRAPED
+      : process.env.SCRAPER_SKIP_SCRAPED;
+  if (raw === undefined || raw === "") return true;
+  const v = String(raw).trim().toLowerCase();
+  if (["false", "0", "no", "off", "all", "refresh", "full", "rescan"].includes(v)) {
+    return false;
+  }
+  return true;
+}
+
+const SKIP_SCRAPED = FORCE_REFRESH ? false : envSaysSkipScraped();
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -91,6 +117,20 @@ async function main() {
 
   await getPool().query("SELECT 1");
   console.log("DB connection OK");
+
+  if (FORCE_REFRESH) {
+    console.log(
+      "Mode: FULL REFRESH (--refresh) — re-scraping all horses from the list"
+    );
+  } else if (SKIP_SCRAPED) {
+    console.log(
+      "Mode: SKIP SCRAPED — only horses not yet in hkjc_horse_details (set SCRAPER_HORSE_DETAILS_SKIP_SCRAPED=false or use --refresh to update existing)"
+    );
+  } else {
+    console.log(
+      "Mode: FULL LIST — SCRAPER_HORSE_DETAILS_SKIP_SCRAPED=false (re-scrape / upsert every horse)"
+    );
+  }
 
   let codes = await loadHorseCodes();
   console.log(`Loaded ${codes.length} horse codes from file`);

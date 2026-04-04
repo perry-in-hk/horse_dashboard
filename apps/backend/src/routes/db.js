@@ -9,6 +9,7 @@ const TABLE_ALLOWLIST = new Set([
   "hkjc_local_race_events",
   "hkjc_horse_details",
   "hkjc_horse_race_history",
+  "hkjc_merged_race_data",
 ]);
 
 // ---- List public tables with row counts -------------------------------------
@@ -16,10 +17,14 @@ const TABLE_ALLOWLIST = new Set([
 router.get("/tables", async (_, res) => {
   const { rows } = await pool.query(
     `SELECT t.table_name,
-            pg_stat_get_live_tuples(c.oid)::int AS row_estimate
+            COALESCE(pg_stat_get_live_tuples(c.oid)::int, 0) AS row_estimate
      FROM information_schema.tables t
      JOIN pg_class c ON c.relname = t.table_name
-     WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+     WHERE t.table_schema = 'public'
+       AND (
+         t.table_type = 'BASE TABLE'
+         OR (t.table_type = 'VIEW' AND t.table_name = 'hkjc_merged_race_data')
+       )
      ORDER BY t.table_name`
   );
   res.json(rows);

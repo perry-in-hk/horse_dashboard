@@ -12,6 +12,7 @@
     "start:scraper": "npm --workspace services/scraper run start",
     "scraper:historical": "npm --workspace services/scraper run historical",
     "scraper:horse-details": "npm --workspace services/scraper run horse-details",
+    "scraper:horse-details:refresh": "npm --workspace services/scraper run horse-details:refresh",
     "start:recommender": "npm --workspace services/recommender run start"
   },
   "keywords": [],
