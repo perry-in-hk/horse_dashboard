@@ -74,10 +74,13 @@ services:
     container_name: hkjc-caddy
     ports:
       - "80:80"
-      # Uncomment when you add a DNS name + TLS block in infra/docker/Caddyfile:
-      # - "443:443"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS in .env to your public hostname (e.g. yourname.duckdns.org)}
     volumes:
       - ./infra/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -112,3 +115,5 @@ services:
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:

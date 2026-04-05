@@ -1,5 +1,5 @@
-# HTTP only on :80. Add a hostname block + :443 when you have DNS for TLS (Let's Encrypt).
-:80 {
+# SITE_ADDRESS is set in docker-compose (from .env). Caddy obtains TLS certs automatically (Let's Encrypt).
+{$SITE_ADDRESS} {
 	handle /api* {
 		reverse_proxy backend:4000
 	}
