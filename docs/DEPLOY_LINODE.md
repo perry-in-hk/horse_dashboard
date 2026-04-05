@@ -1,0 +1,363 @@
+# HKJC Dashboard — Linode deployment tutorial
+
+This guide summarizes a working path to run the Docker Compose stack on **Linode (Akamai)** and optionally **copy database data from a local PC** to the server.
+
+**Goal:** Open the app at `http://<Linode-public-IP>/` (port **80** via Caddy), with the API under the same origin at `/api/...`.
+
+---
+
+## 0. End-to-end summary (what worked)
+
+This section is the **short story** of a full deploy + data migration. Read the numbered phases below for detail.
+
+| Step | What you do |
+|------|----------------|
+| 1 | Create Linode, firewall (22 + 80), install Docker on the server. |
+| 2 | `git clone` the repo — note the **actual folder name** (e.g. `horse_dashboard`), not necessarily `HKJC_Dashboard`. |
+| 3 | Copy `.env.example` → `.env`; set **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_DB`**, and **`DATABASE_URL`** with the **same** user/password; DB host **`postgres`**, not `localhost`. Add **`SESSION_SECRET`**, **`AUTH_INITIAL_USERNAME`**, and **`AUTH_INITIAL_PASSWORD`** (first boot only, creates the first admin user). |
+| 4 | `docker compose up -d --build`; open `http://<PUBLIC_IP>/`. The **Analysis** page reads **Postgres on the server** — it will be **empty** until you restore data. |
+| 5 | On your PC, create a dump **without PowerShell destroying UTF-8** (see [§7](#7-phase-e--copy-local-database-to-server-optional) — **recommended:** `pg_dump` to a file **inside** the container, then `docker cp` out). |
+| 6 | `scp` the `.sql` (or `.dump`) file to the server project directory. |
+| 7 | On the server, read **`POSTGRES_USER`** with `docker exec … env \| grep POSTGRES` — use **that** username in every `psql` / `pg_restore` command (it may be `hkjc`, `hkjc_1`, or another value you chose). |
+| 8 | Stop services that hold DB connections, **drop + recreate** the target database, **restore**, then `docker compose up -d`. |
+| 9 | Verify with SQL (`SELECT horse_name …`) and in the browser — **Traditional Chinese** must look correct; if not, the dump file was still corrupted on Windows (redo step 5). |
+
+**Challenges we hit in practice (and fixes):**
+
+| Challenge | Fix |
+|-----------|-----|
+| Empty **Analysis** / analytics on the server | Server Postgres is a **new** volume — **migrate** with `pg_dump` / `psql` or re-scrape on the server. |
+| `role "hkjc" does not exist` | Server was initialized with a **different** `POSTGRES_USER` — use `docker exec … env \| grep POSTGRES` and that user in all commands. |
+| `invalid command \%…` or UTF-8 errors on restore | Dump was **UTF-16** (common if PowerShell `>` was used) — re-dump using [§E1](#e1-dump-on-windows-recommended-utf-8-safe) or convert with `iconv` only as a last resort; **re-dump cleanly** for correct Chinese. |
+| Traditional Chinese shows **mojibake** after restore | **UTF-8 was corrupted when saving the dump on Windows** — use **`docker exec … -f /tmp/…` + `docker cp`** or `-Fc` format; then **full restore** again. |
+
+---
+
+## 1. Architecture (short)
+
+- **Caddy** listens on **:80**, proxies `/api*` and `/health` to **backend:4000**, and everything else to **frontend:5173**.
+- **Backend** and **frontend** are not exposed on host ports **4000/5173**; only **Caddy** is public on **80**.
+- **Postgres** and **Redis** store data in **Docker volumes on the server** — a separate database from your **local** dev instance unless you **migrate** data (see [§7](#7-phase-e--copy-local-database-to-server-optional)).
+
+---
+
+## 2. Prerequisites
+
+- Linode account, **Ubuntu 24.04** (or 22.04), **≥2 GB RAM**, region e.g. **Singapore** (good latency from Hong Kong).
+- **SSH** access (password or key).
+- **Git** repository URL so the server can `git clone`.
+- On your PC: **Docker Desktop** if you dump the database from local Compose.
+
+---
+
+## 3. Phase A — Server setup
+
+### A1. Create Linode
+
+- Pick a plan (e.g. **2 GB** shared CPU).
+- Note the **public IPv4**.
+
+### A2. SSH keys (optional but recommended)
+
+- PC: public key in `%USERPROFILE%\.ssh\*.pub` (or create with `ssh-keygen`).
+- Linode: **Account → SSH Keys** → add the public key.
+
+### A3. Cloud Firewall
+
+1. **Create Firewall** → default **inbound: Drop**, **outbound: Accept**.
+2. The first screen may only show **default policies** — **create** the firewall, then open it again to add **inbound rules**.
+3. **Inbound rules** → **Add**:
+   - **TCP 22** — SSH (ideally restricted to **your IP**/32).
+   - **TCP 80** — HTTP (Caddy).
+   - **TCP 443** — optional until you use HTTPS with a domain.
+4. **Attach** the firewall to the Linode.
+
+Do **not** open **5432** (Postgres) or **6379** (Redis) to the world.
+
+### A4. Install Docker (on the server)
+
+Follow **[Docker’s official Ubuntu install](https://docs.docker.com/engine/install/ubuntu/)** (Engine + **Compose plugin**). Verify:
+
+```bash
+docker --version
+docker compose version
+docker run --rm hello-world
+```
+
+If you only use **root** over SSH, you do **not** need `usermod -aG docker` unless you add a non-root user later.
+
+---
+
+## 4. Phase B — Get code on the server
+
+```bash
+cd /root
+git clone https://github.com/YOUR_ORG/YOUR_REPO.git
+cd YOUR_REPO_FOLDER
+```
+
+**Tip:** `git clone` creates a folder named like the **GitHub repository** (e.g. `horse_dashboard`), not necessarily the same name as your local project folder.
+
+---
+
+## 5. Phase C — Environment file (`.env`)
+
+### C1. Create `.env`
+
+```bash
+cd ~/YOUR_REPO_FOLDER
+cp .env.example .env
+nano .env
+```
+
+You can also paste from your PC via `scp` or editor — see [§8](#8-challenges-cheat-sheet) for Windows encoding pitfalls when handling SQL dumps.
+
+### C2. Required values (must be consistent)
+
+| Variable | Rule |
+|----------|------|
+| `POSTGRES_USER` | e.g. `hkjc` — **one** username for the whole stack |
+| `POSTGRES_PASSWORD` | Strong secret |
+| `DATABASE_URL` | Same **user** and **password** as above; host must be **`postgres`** (Docker service name), **not** `localhost`: `postgresql://USER:PASSWORD@postgres:5432/hkjc_dashboard` |
+| `REDIS_URL` | Usually `redis://redis:6379` |
+| `SESSION_SECRET` | Long random string; signs session cookies |
+| `AUTH_INITIAL_USERNAME` / `AUTH_INITIAL_PASSWORD` | **Only** when `dashboard_users` is empty — creates the first admin |
+| `SESSION_COOKIE_SECURE` | Optional: set `true` when terminating HTTPS in Caddy so cookies are `Secure` |
+
+**Critical:** The username in `DATABASE_URL` must **match** `POSTGRES_USER`. A mismatch causes `password authentication failed` or `role "hkjc" does not exist`.
+
+### C3. Postgres volume and passwords
+
+Postgres initializes credentials **only on first** creation of its data directory. If you change `POSTGRES_PASSWORD` in `.env` later, the volume may still use the **old** password. Fix by either:
+
+- Using the **original** password in `DATABASE_URL`, or  
+- `docker compose down -v` (⚠️ **deletes database data**) and bringing the stack up again with one consistent password.
+
+### C4. Frontend + Caddy (`VITE_*`)
+
+With Compose, the **frontend** service may set `VITE_API_URL` to `""` so the browser uses **same-origin** `/api/...` through Caddy. You do not need `http://localhost:4000` on the server for that pattern.
+
+---
+
+## 6. Phase D — Deploy
+
+```bash
+cd ~/YOUR_REPO_FOLDER
+docker compose up -d --build
+docker compose ps
+```
+
+**Checks:**
+
+```bash
+curl -sS http://127.0.0.1/health
+```
+
+**Browser:** `http://<PUBLIC_IP>/` (not `:5173` or `:4000`).
+
+---
+
+## 7. Phase E — Copy local database to server (optional)
+
+**Facts:**
+
+- Local Postgres and server Postgres are **different instances** (different Docker volumes).
+- The **Analysis** page and most APIs read **Postgres** — “no data in the cloud” means the **server database was never filled**, not a frontend bug.
+- **`pg_dump` only creates a file** — you must **`psql` / `pg_restore`** on the server to import.
+- **Never use raw PowerShell `>`** to capture `pg_dump` output: it often saves **UTF-16 LE** with a BOM. That causes:
+  - Linux `psql`: errors like `invalid command \%…` or UTF-8 failures.
+  - Even after `iconv`, **Traditional Chinese can stay garbled** (UTF-8 was mis-decoded when the file was written). **Fix:** create the dump again using one of the safe methods below.
+
+### E1. Dump on Windows (recommended: UTF-8 safe)
+
+**Best: write the file inside the Linux container, then copy out** — encoding matches your DB, no PowerShell mangling.
+
+Use the **Postgres service name** from Compose (`postgres`) and your **local** DB user from `.env` (often `hkjc`):
+
+```powershell
+cd C:\path\to\HKJC_Dashboard
+docker compose exec postgres pg_dump -U hkjc --no-owner --no-acl -f /tmp/hkjc_export.sql hkjc_dashboard
+docker cp hkjc-postgres:/tmp/hkjc_export.sql .\hkjc_export.sql
+```
+
+If your container name differs, run `docker ps` and use that name in `docker cp` (e.g. `horse_dashboard-postgres-1`).
+
+**Optional check before upload** (Git Bash / WSL / Linux):
+
+```bash
+file hkjc_export.sql
+# Should show: UTF-8 Unicode text …  (not UTF-16)
+```
+
+Open a small part of the file and confirm a `COPY` line shows **correct Chinese** for horse names — not mojibake.
+
+**Alternatives (if you cannot use `docker cp`):**
+
+- **Command Prompt (`cmd.exe`)** — `>` is usually ANSI/OEM; still riskier than `docker cp`.
+
+```bat
+docker compose exec -T postgres pg_dump -U hkjc -d hkjc_dashboard --no-owner --no-acl > backup_full.sql
+```
+
+- **PowerShell** — explicit UTF-8 **without BOM**:
+
+```powershell
+docker compose exec -T postgres pg_dump -U hkjc -d hkjc_dashboard --no-owner --no-acl | Set-Content -Path backup_full.sql -Encoding utf8NoBOM
+```
+
+**Binary format** (avoids text encoding issues entirely):
+
+```powershell
+docker compose exec postgres pg_dump -U hkjc -Fc --no-owner --no-acl -f /tmp/hkjc.dump hkjc_dashboard
+docker cp hkjc-postgres:/tmp/hkjc.dump .\hkjc.dump
+```
+
+Restore on server with `pg_restore` (see [E4](#e4-restore-on-the-server)).
+
+### E2. Full dump vs data-only
+
+| Situation | What to use |
+|-----------|-------------|
+| Server DB is **empty** or you will **drop and recreate** the database | **Full** dump (`pg_dump` without `--data-only`), optionally with `--clean --if-exists` when dumping for idempotent replays. |
+| Server **already has** the same schema from migrations | **`--data-only`** from local, or you get “relation already exists”. |
+
+### E3. Copy to Linode
+
+Replace `USER`, `PUBLIC_IP`, and path with yours (`scp` placeholders are not literal):
+
+```powershell
+scp "C:\path\to\hkjc_export.sql" USER@PUBLIC_IP:/root/YOUR_REPO_FOLDER/
+```
+
+### E4. Restore on the server
+
+**Discover the real DB role on this server** (do not assume `hkjc`):
+
+```bash
+cd ~/YOUR_REPO_FOLDER
+docker exec hkjc-postgres env | grep POSTGRES
+```
+
+Note `POSTGRES_USER` and `POSTGRES_DB`. Use **`POSTGRES_USER`** in every `-U` below.
+
+**Stop** services that keep connections open:
+
+```bash
+docker compose stop backend scraper recommender
+```
+
+**Replace the database** (full SQL restore; destructive for that DB):
+
+```bash
+docker exec hkjc-postgres psql -U YOUR_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS hkjc_dashboard WITH (FORCE);"
+docker exec hkjc-postgres psql -U YOUR_POSTGRES_USER -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE hkjc_dashboard OWNER YOUR_POSTGRES_USER;"
+```
+
+Adjust `hkjc-postgres` if `docker ps` shows a different container name.
+
+**Import** (plain SQL):
+
+```bash
+docker exec -i hkjc-postgres psql -U YOUR_POSTGRES_USER -d hkjc_dashboard -v ON_ERROR_STOP=1 < /root/YOUR_REPO_FOLDER/hkjc_export.sql
+```
+
+**Import** (custom `-Fc` file):
+
+```bash
+docker cp /root/YOUR_REPO_FOLDER/hkjc.dump hkjc-postgres:/tmp/hkjc.dump
+docker exec hkjc-postgres pg_restore -U YOUR_POSTGRES_USER --no-owner --no-acl -d hkjc_dashboard /tmp/hkjc.dump
+```
+
+**Start** the stack again:
+
+```bash
+docker compose up -d
+```
+
+**Sanity checks:**
+
+```bash
+docker exec hkjc-postgres psql -U YOUR_POSTGRES_USER -d hkjc_dashboard -c "SELECT COUNT(*) FROM hkjc_race_results;"
+docker exec hkjc-postgres psql -U YOUR_POSTGRES_USER -d hkjc_dashboard -c "SELECT horse_name FROM hkjc_race_results WHERE horse_name IS NOT NULL LIMIT 3;"
+```
+
+If **`horse_name`** looks correct in `psql` but wrong in the browser, clear cache / hard-reload; if it is wrong in `psql`, the dump file was still bad — redo [E1](#e1-dump-on-windows-recommended-utf-8-safe).
+
+### E5. If you already uploaded a UTF-16 `.sql` (recovery)
+
+On the server, `file your.sql` may show **UTF-16**. You can try:
+
+```bash
+iconv -f UTF-16LE -t UTF-8 your.sql | sed 's/\r$//' > your_utf8.sql
+```
+
+**Warning:** If Chinese was already corrupted when the file was created on Windows, **iconv cannot repair it** — re-dump with [E1](#e1-dump-on-windows-recommended-utf-8-safe).
+
+### E6. Dump on the Linux server only (bash)
+
+Safe redirect on Linux:
+
+```bash
+docker compose exec -T postgres pg_dump -U YOUR_USER -d hkjc_dashboard --no-owner --no-acl > backup.sql
+```
+
+---
+
+## 8. Challenges (cheat sheet)
+
+| Symptom | Cause | Fix |
+|---------|--------|-----|
+| `POSTGRES_PASSWORD is missing` | Empty or unset in `.env` | Set `POSTGRES_PASSWORD` and a full `DATABASE_URL` |
+| `password authentication failed for user "hkjc"` | Wrong password or **user mismatch** between `DATABASE_URL` and `POSTGRES_USER` | Align user + password; align with volume’s initial password or use `down -v` |
+| `role "hkjc" does not exist` | Server was initialized with a **different** `POSTGRES_USER` (e.g. `hkjc_1`) | `docker exec … env \| grep POSTGRES` — use that user in `psql` and in `DATABASE_URL` |
+| `invalid command \%…` / `invalid byte sequence for encoding "UTF8"` | Dump saved as **UTF-16** (typical: PowerShell **`>`** redirect) | Re-dump with [`docker exec` + `/tmp` + `docker cp`](#e1-dump-on-windows-recommended-utf-8-safe) or `-Fc` |
+| `file` shows **UTF-16** / **CRLF** on the server | Same as above | Re-dump; optional emergency: `iconv` + `sed` ([§E5](#e5-if-you-already-uploaded-a-utf-16-sql-recovery)) — **Chinese may still be wrong** if the file was mangled at dump time |
+| Horse names / Chinese show **mojibake** in UI after restore | UTF-8 was **mis-decoded when the dump was written on Windows** | Re-dump with [§E1](#e1-dump-on-windows-recommended-utf-8-safe); verify Chinese in the `.sql` **before** `scp` |
+| `relation already exists` on restore | Full dump applied when schema **already** exists | Use **`--data-only`** from local, or **drop + create** the database ([§E4](#e4-restore-on-the-server)) |
+| UI works but **no cloud data** | Server DB is empty / separate volume | Restore data ([§7](#7-phase-e--copy-local-database-to-server-optional)) or re-run scrapers on the server |
+| `cd` wrong folder after clone | Clone directory = **repo name** | `find ~ -name docker-compose.yml`; `cd` into that folder |
+
+---
+
+## 9. Security reminders
+
+- Do **not** commit `.env` or share **secrets** (passwords, `SESSION_SECRET`, `OPENAI_API_KEY`, etc.) in public chats.
+- Restrict firewall **22** to your IP when possible.
+- Avoid exposing Postgres **5432** / Redis **6379** to the public internet in production-oriented setups.
+
+---
+
+## 10. One-page command list (happy path)
+
+```text
+# Server: install Docker (official docs) → verify hello-world
+
+# Server:
+git clone <repo-url>
+cd <repo-folder>    # e.g. horse_dashboard — use real clone name
+cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSION_SECRET; AUTH_INITIAL_* (first admin)
+
+docker compose up -d --build
+curl -sS http://127.0.0.1/health
+# Browser: http://<PUBLIC_IP>/
+
+# Optional: copy local Postgres → server (recommended: UTF-8-safe)
+# PC (PowerShell) — dump inside container, copy out (local DB user from .env, often hkjc):
+#   docker compose exec postgres pg_dump -U hkjc --no-owner --no-acl -f /tmp/hkjc_export.sql hkjc_dashboard
+#   docker cp <postgres-container-name>:/tmp/hkjc_export.sql .\hkjc_export.sql
+#   scp .\hkjc_export.sql root@<IP>:/root/<repo-folder>/
+# Server — use POSTGRES_USER from: docker exec <pg-container> env | grep POSTGRES
+#   docker compose stop backend scraper recommender
+#   docker exec … psql -U <POSTGRES_USER> -d postgres -c "DROP DATABASE IF EXISTS hkjc_dashboard WITH (FORCE);"
+#   docker exec … psql -U <POSTGRES_USER> -d postgres -c "CREATE DATABASE hkjc_dashboard OWNER <POSTGRES_USER>;"
+#   docker exec -i … psql -U <POSTGRES_USER> -d hkjc_dashboard -v ON_ERROR_STOP=1 < hkjc_export.sql
+#   docker compose up -d
+# Verify: psql SELECT horse_name … — Chinese must be correct before trusting the UI
+```
+
+---
+
+## References
+
+- [Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+- [Linode Cloud Firewall](https://www.linode.com/docs/guides/cloud-firewall/)

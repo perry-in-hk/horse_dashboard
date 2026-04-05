@@ -66,6 +66,160 @@ body {
   color: #f8fafc;
 }
 
+.topbar-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.topbar-username {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-role {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.topbar-logout {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.5);
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.topbar-logout:hover {
+  background: rgba(51, 65, 85, 0.8);
+}
+
+/* === Login page ========================================================== */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-lead {
+  margin: -8px 0 20px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.login-input {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: #64748b;
+}
+
+.login-error {
+  margin: 0;
+  font-size: 13px;
+  color: #f87171;
+}
+
+.login-submit {
+  margin-top: 4px;
+}
+
+.user-admin-form {
+  margin-top: 16px;
+}
+
+.user-admin-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+  .user-admin-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.user-admin-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.user-admin-input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.user-admin-table-wrap {
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.user-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.user-admin-table th,
+.user-admin-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.user-admin-table th {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
 /* === Page content ========================================================= */
 .page-content {
   flex: 1;
