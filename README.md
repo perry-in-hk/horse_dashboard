@@ -23,7 +23,7 @@ docker compose up --build
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:4000/health`
 
-Use header `x-api-key: dev-hkjc-key` for API requests.
+Sign in through the web UI; the API uses **session cookies** (httpOnly), not a shared API key in the browser. Set `SESSION_SECRET`, `AUTH_INITIAL_USERNAME`, and `AUTH_INITIAL_PASSWORD` in `.env` when the database has no users yet (see `.env.example`).
 
 ## API Endpoints
 

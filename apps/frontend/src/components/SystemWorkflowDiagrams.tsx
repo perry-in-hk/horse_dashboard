@@ -45,11 +45,12 @@ export const SETTINGS_CONFIG_FLOW_DIAGRAM = `flowchart TB
   subgraph persisted [Persisted data]
     pgStore[(PostgreSQL)]
   end
-  envHost -->|DATABASE_URL REDIS_URL API_KEY SCRAPER_ROOT| apiNode
+  envHost -->|DATABASE_URL REDIS_URL SESSION_SECRET SCRAPER_ROOT| apiNode
+  envHost -->|AUTH_INITIAL for first admin only| apiNode
   envHost -->|ODDS_SYNC ODDS_SYNC_ODDS_TYPES OPENAI OPENAI_FORCE_JSON AI_MOMENTUM| apiNode
   envHost -->|ODDS_SYNC_INTERVAL_MS seeds worker| oddsWorkerNode
-  viteEnv -->|VITE_API_URL VITE_WS_URL optional key| pages
-  pages -->|HTTP with x-api-key| apiNode
+  viteEnv -->|VITE_API_URL VITE_WS_URL| pages
+  pages -->|HTTP session cookie after login| apiNode
   pages -->|PUT worker interval| apiNode
   apiNode -->|in-memory worker interval until restart| oddsWorkerNode
   apiNode -->|on-demand scraper jobs| pgStore
@@ -76,7 +77,7 @@ export const DOCKER_BUILD_RUN_DIAGRAM = `flowchart TB
     waitJobs[Scraper and recommender start after database and API]
   end
   subgraph result [What you get]
-    browserNote[Browser opens the web app and talks to the API on port 4000 using VITE_API_URL]
+    browserNote[Browser opens the web app same-origin /api via Caddy or Vite proxy in dev]
   end
   folder --> cmdBuild
   envfile --> cmdBuild
@@ -115,7 +116,7 @@ export const AI_RECOMMENDATION_FLOW_DIAGRAM = `flowchart TB
     openaiApi{{OpenAI-compatible API: JSON object mode when enabled}}
   end
   userAiNode -->|open tab pick meeting race| aiTab
-  aiTab -->|HTTP with x-api-key| aiPost
+  aiTab -->|HTTP session cookie| aiPost
   aiPost --> buildCtx
   buildCtx -->|read snapshots form rows momentum query| pgAi
   buildCtx -->|live runners when needed| gqlAi

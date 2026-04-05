@@ -1,21 +1,26 @@
 import SystemWorkflowDiagrams from "../components/SystemWorkflowDiagrams.tsx";
+import UserAdminSection from "../components/UserAdminSection.tsx";
 
 export default function Settings() {
   return (
     <div className="settings-page">
+      <UserAdminSection />
+
       <section className="card settings-intro">
         <h2 className="card-title">Settings</h2>
         <p className="muted">
           Day-to-day tuning uses the <strong>Realtime</strong> page (worker interval, sync) and{" "}
           <strong>Scraper</strong> jobs. Secrets and infrastructure live in <code className="settings-inline-code">.env</code>{" "}
-          (see <code className="settings-inline-code">.env.example</code>): database URL, API keys,{" "}
+          (see <code className="settings-inline-code">.env.example</code>): database URL,{" "}
+          <code className="settings-inline-code">SESSION_SECRET</code>,{" "}
+          <code className="settings-inline-code">AUTH_INITIAL_*</code> for the first admin only,{" "}
           <code className="settings-inline-code">ODDS_SYNC_*</code>, <code className="settings-inline-code">OPENAI_*</code>{" "}
           (including optional <code className="settings-inline-code">OPENAI_FORCE_JSON</code>),{" "}
           <code className="settings-inline-code">AI_MOMENTUM_*</code> for the AI short-window odds-drop summary, and{" "}
-          <code className="settings-inline-code">VITE_*</code> for the web build. The browser sends{" "}
-          <code className="settings-inline-code">x-api-key</code> on API calls. Successful <strong>智能分析</strong> runs are
-          stored in PostgreSQL (<code className="settings-inline-code">hkjc_ai_analyses</code>) for later review on the same
-          tab.
+          <code className="settings-inline-code">VITE_*</code> for the web build (API base URL). The browser uses{" "}
+          <strong>session cookies</strong> (httpOnly) after sign-in — no shared API key in the bundle. Successful{" "}
+          <strong>智能分析</strong> runs are stored in PostgreSQL (<code className="settings-inline-code">hkjc_ai_analyses</code>)
+          for later review on the same tab.
         </p>
       </section>
 

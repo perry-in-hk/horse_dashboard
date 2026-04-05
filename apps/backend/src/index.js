@@ -3,8 +3,14 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
+import rateLimit from "express-rate-limit";
 import { pool } from "./db.js";
 import { runMigrations } from "./migrate.js";
+import { createSessionMiddleware } from "./sessionStore.js";
+import { requireAuth } from "./middleware/auth.js";
+import { bootstrapInitialAdmin } from "./bootstrapAdmin.js";
+import { login, logout, me } from "./routes/authHandlers.js";
+import usersRouter from "./routes/users.js";
 import analyticsRouter from "./routes/analytics.js";
 import dbRouter from "./routes/db.js";
 import scraperRouter from "./routes/scraper.js";
@@ -13,25 +19,43 @@ import aiRouter from "./routes/ai.js";
 import { startOddsSyncWorker } from "./oddsSyncWorker.js";
 
 const app = express();
+app.set("trust proxy", 1);
+
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(morgan("dev"));
 
-const apiKey = process.env.API_KEY;
-app.use("/api", (req, res, next) => {
-  if (!apiKey) return next();
-  if (req.headers["x-api-key"] !== apiKey) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
+let sessionMiddleware;
+try {
+  sessionMiddleware = createSessionMiddleware();
+} catch (e) {
+  console.error(e.message);
+  process.exit(1);
+}
+app.use(sessionMiddleware);
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-app.use("/api/analytics", analyticsRouter);
-app.use("/api/db", dbRouter);
-app.use("/api/scraper", scraperRouter);
-app.use("/api/realtime", realtimeRouter);
-app.use("/api/ai", aiRouter);
+app.post("/api/auth/login", loginLimiter, login);
+
+const protectedApi = express.Router();
+protectedApi.use(requireAuth);
+protectedApi.get("/auth/me", me);
+protectedApi.post("/auth/logout", logout);
+protectedApi.use("/users", usersRouter);
+protectedApi.use("/analytics", analyticsRouter);
+protectedApi.use("/db", dbRouter);
+protectedApi.use("/scraper", scraperRouter);
+protectedApi.use("/realtime", realtimeRouter);
+protectedApi.use("/ai", aiRouter);
+
+app.use("/api", protectedApi);
 
 app.get("/health", async (_, res) => {
   await pool.query("SELECT 1");
@@ -39,12 +63,22 @@ app.get("/health", async (_, res) => {
 });
 
 const port = Number(process.env.PORT ?? 4000);
-const server = app.listen(port, async () => {
-  await runMigrations();
-  startOddsSyncWorker();
-  console.log(`Backend listening on ${port}`);
-});
 
-server.on("error", (err) => {
-  console.error(err);
-});
+(async () => {
+  try {
+    await runMigrations();
+    await bootstrapInitialAdmin();
+  } catch (e) {
+    console.error(e);
+    process.exit(1);
+  }
+
+  const server = app.listen(port, () => {
+    startOddsSyncWorker();
+    console.log(`Backend listening on ${port}`);
+  });
+
+  server.on("error", (err) => {
+    console.error(err);
+  });
+})();
