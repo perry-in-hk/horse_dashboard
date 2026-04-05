@@ -21,6 +21,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 | 7 | On the server, read **`POSTGRES_USER`** with `docker exec … env \| grep POSTGRES` — use **that** username in every `psql` / `pg_restore` command (it may be `hkjc`, `hkjc_1`, or another value you chose). |
 | 8 | Stop services that hold DB connections, **drop + recreate** the target database, **restore**, then `docker compose up -d`. |
 | 9 | Verify with SQL (`SELECT horse_name …`) and in the browser — **Traditional Chinese** must look correct; if not, the dump file was still corrupted on Windows (redo step 5). |
+| **Later: update app on server** | On PC: `git push`. On server: `git pull`, then **`docker compose up -d --build`**. If pull fails on untracked `*.sql` files, move/remove them first ([§6 D1](#d1-server-updates-git-pull-and-rebuild)). Use **GitHub PAT or SSH** — not your GitHub password ([§6 D1](#d1-server-updates-git-pull-and-rebuild)). |
 
 **Challenges we hit in practice (and fixes):**
 
@@ -154,6 +155,53 @@ curl -sS http://127.0.0.1/health
 ```
 
 **Browser:** `http://<PUBLIC_IP>/` (not `:5173` or `:4000`).
+
+### D1. Server updates: git pull and rebuild
+
+1. **On your PC:** commit, then **`git push`** to `main` (or your deploy branch). If push fails with **“Password authentication is not supported”**, GitHub no longer accepts account passwords over HTTPS — use a **[Personal Access Token](https://github.com/settings/tokens)** (with `repo` scope) as the password, or switch the remote to **SSH** (`git@github.com:USER/REPO.git`) and use an SSH key.
+
+2. **On the server:**
+
+```bash
+cd ~/YOUR_REPO_FOLDER   # e.g. horse_dashboard — same folder as docker-compose.yml
+git pull origin main
+docker compose up -d --build
+```
+
+**`--build`** is important so backend/frontend **images** include the latest code. A bare `git pull` alone does not change running containers.
+
+3. **Browser still shows an old UI?** Hard-refresh (**Ctrl+Shift+R**) or a private window. Confirm the server is on the new commit: `git log -1 --oneline`. Confirm you opened **`http://<PUBLIC_IP>/`** (port **80**), not `:5173` (Vite is only inside Docker; Caddy exposes **80**).
+
+#### `git pull` error: untracked files would be overwritten by merge
+
+If the repo **tracks** files such as `backup.sql`, `hkjc_clean.sql`, or `hkjc_restore.sql`, but the server has **local untracked** files with the **same names** (e.g. you uploaded dumps by hand), Git aborts the merge:
+
+> `error: The following untracked working tree files would be overwritten by merge`
+
+**Fix — move them out of the repo directory** (keeps your copies):
+
+```bash
+cd ~/YOUR_REPO_FOLDER
+mkdir -p ~/sql_dumps_backup
+mv backup.sql hkjc_clean.sql hkjc_restore.sql ~/sql_dumps_backup/ 2>/dev/null || true
+git pull origin main
+```
+
+Or **delete** those filenames in the project folder if you do not need them on disk:
+
+```bash
+cd ~/YOUR_REPO_FOLDER
+rm -f backup.sql hkjc_clean.sql hkjc_restore.sql
+git pull origin main
+```
+
+Then run **`docker compose up -d --build`** again.
+
+**Prevention:** Prefer **not** committing large SQL dumps to git (add patterns to `.gitignore` on the branch you push from) so production servers do not need those files in the tree at all.
+
+#### Local versus server Postgres user
+
+Your **PC** and **Linode** Postgres volumes may have been created with **different** `POSTGRES_USER` values (e.g. local `hkjc`, server `hkjc_1`). **Do not copy your PC `.env` to the server wholesale** — keep **`POSTGRES_USER`** and **`DATABASE_URL`** on the server aligned with whatever role actually exists there (`docker exec <postgres-container> env | grep POSTGRES` and `\du` in `psql`). See [§5 C2–C3](#c2-required-values-must-be-consistent) and [§8](#8-challenges-cheat-sheet).
 
 ---
 
@@ -316,6 +364,9 @@ docker compose exec -T postgres pg_dump -U YOUR_USER -d hkjc_dashboard --no-owne
 | `relation already exists` on restore | Full dump applied when schema **already** exists | Use **`--data-only`** from local, or **drop + create** the database ([§E4](#e4-restore-on-the-server)) |
 | UI works but **no cloud data** | Server DB is empty / separate volume | Restore data ([§7](#7-phase-e--copy-local-database-to-server-optional)) or re-run scrapers on the server |
 | `cd` wrong folder after clone | Clone directory = **repo name** | `find ~ -name docker-compose.yml`; `cd` into that folder |
+| **`git pull`**: `untracked working tree files would be overwritten` | Local untracked files (e.g. `backup.sql`) **same path** as files coming from the remote branch | Move or `rm` those files, then `git pull` again ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
+| **`git pull` / `git push`**: `Password authentication is not supported` | GitHub **HTTPS** no longer accepts account passwords | Use a **Personal Access Token** as the password, or use **SSH** remote + SSH key ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
+| Site still **old UI** after deploy | No `docker compose up --build`, wrong folder, or browser cache | `git log -1`; `docker compose up -d --build`; hard refresh; use **port 80** not `:5173` ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
 
 ---
 
@@ -340,6 +391,9 @@ cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSI
 docker compose up -d --build
 curl -sS http://127.0.0.1/health
 # Browser: http://<PUBLIC_IP>/
+
+# Update later (after git push from PC): git pull origin main && docker compose up -d --build
+# If pull fails on untracked backup*.sql: move them out or rm, then pull again — see §6 D1
 
 # Optional: copy local Postgres → server (recommended: UTF-8-safe)
 # PC (PowerShell) — dump inside container, copy out (local DB user from .env, often hkjc):
