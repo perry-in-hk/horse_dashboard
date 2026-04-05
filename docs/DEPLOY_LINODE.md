@@ -2,7 +2,7 @@
 
 This guide summarizes a working path to run the Docker Compose stack on **Linode (Akamai)** and optionally **copy database data from a local PC** to the server.
 
-**Goal:** Open the app at `http://<Linode-public-IP>/` (port **80** via Caddy), with the API under the same origin at `/api/...`.
+**Goal:** Open the app at `http://<Linode-public-IP>/` (port **80** via Caddy), with the API under the same origin at `/api/...`. Optionally use **`https://<your-hostname>/`** (e.g. DuckDNS) with TLS on **443** — see [§9](#9-https-with-a-hostname-optional).
 
 ---
 
@@ -12,7 +12,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 
 | Step | What you do |
 |------|----------------|
-| 1 | Create Linode, firewall (22 + 80), install Docker on the server. |
+| 1 | Create Linode, firewall (**22** + **80**, and **443** if you plan HTTPS), install Docker on the server. |
 | 2 | `git clone` the repo — note the **actual folder name** (e.g. `horse_dashboard`), not necessarily `HKJC_Dashboard`. |
 | 3 | Copy `.env.example` → `.env`; set **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_DB`**, and **`DATABASE_URL`** with the **same** user/password; DB host **`postgres`**, not `localhost`. Add **`SESSION_SECRET`**, **`AUTH_INITIAL_USERNAME`**, and **`AUTH_INITIAL_PASSWORD`** (first boot only, creates the first admin user). |
 | 4 | `docker compose up -d --build`; open `http://<PUBLIC_IP>/`. The **Analysis** page reads **Postgres on the server** — it will be **empty** until you restore data. |
@@ -22,6 +22,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 | 8 | Stop services that hold DB connections, **drop + recreate** the target database, **restore**, then `docker compose up -d`. |
 | 9 | Verify with SQL (`SELECT horse_name …`) and in the browser — **Traditional Chinese** must look correct; if not, the dump file was still corrupted on Windows (redo step 5). |
 | **Later: update app on server** | On PC: `git push`. On server: `git pull`, then **`docker compose up -d --build`**. If pull fails on untracked `*.sql` files, move/remove them first ([§6 D1](#d1-server-updates-git-pull-and-rebuild)). Use **GitHub PAT or SSH** — not your GitHub password ([§6 D1](#d1-server-updates-git-pull-and-rebuild)). |
+| **Optional: HTTPS + hostname** | Point DNS (e.g. [DuckDNS](https://www.duckdns.org/)) A record → Linode IP; firewall **443**; set **`SITE_ADDRESS`** + **`SESSION_COOKIE_SECURE=true`** in `.env`; `docker compose up -d --build`. See [§9](#9-https-with-a-hostname-optional). |
 
 **Challenges we hit in practice (and fixes):**
 
@@ -31,13 +32,15 @@ This section is the **short story** of a full deploy + data migration. Read the 
 | `role "hkjc" does not exist` | Server was initialized with a **different** `POSTGRES_USER` — use `docker exec … env \| grep POSTGRES` and that user in all commands. |
 | `invalid command \%…` or UTF-8 errors on restore | Dump was **UTF-16** (common if PowerShell `>` was used) — re-dump using [§E1](#e1-dump-on-windows-recommended-utf-8-safe) or convert with `iconv` only as a last resort; **re-dump cleanly** for correct Chinese. |
 | Traditional Chinese shows **mojibake** after restore | **UTF-8 was corrupted when saving the dump on Windows** — use **`docker exec … -f /tmp/…` + `docker cp`** or `-Fc` format; then **full restore** again. |
+| **`Blocked request. This host ("…") is not allowed`** (Vite) | Vite **8+** blocks unknown `Host` headers; Caddy forwards your domain → set **`server.allowedHosts: true`** in `apps/frontend/vite.config.ts`, rebuild **frontend** ([§9.4](#94-common-https--vite-issues)). |
+| **`Set SITE_ADDRESS in .env`** when running Compose | **`SITE_ADDRESS`** is missing on the server `.env` (required for Caddy TLS) — add e.g. `SITE_ADDRESS=yourname.duckdns.org` ([§9](#9-https-with-a-hostname-optional)). |
 
 ---
 
 ## 1. Architecture (short)
 
-- **Caddy** listens on **:80**, proxies `/api*` and `/health` to **backend:4000**, and everything else to **frontend:5173**.
-- **Backend** and **frontend** are not exposed on host ports **4000/5173**; only **Caddy** is public on **80**.
+- **Caddy** listens on **:80** (and **:443** when using HTTPS), proxies `/api*` and `/health` to **backend:4000**, and everything else to **frontend:5173**. With a **`SITE_ADDRESS`** in `.env`, Caddy obtains **Let’s Encrypt** certificates and serves **HTTPS** automatically.
+- **Backend** and **frontend** are not exposed on host ports **4000/5173**; only **Caddy** is public on **80** / **443**.
 - **Postgres** and **Redis** store data in **Docker volumes on the server** — a separate database from your **local** dev instance unless you **migrate** data (see [§7](#7-phase-e--copy-local-database-to-server-optional)).
 
 ---
@@ -70,7 +73,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 3. **Inbound rules** → **Add**:
    - **TCP 22** — SSH (ideally restricted to **your IP**/32).
    - **TCP 80** — HTTP (Caddy).
-   - **TCP 443** — optional until you use HTTPS with a domain.
+   - **TCP 443** — **required** if you use **HTTPS** with a domain ([§9](#9-https-with-a-hostname-optional)); optional for IP-only HTTP.
 4. **Attach** the firewall to the Linode.
 
 Do **not** open **5432** (Postgres) or **6379** (Redis) to the world.
@@ -123,7 +126,8 @@ You can also paste from your PC via `scp` or editor — see [§8](#8-challenges-
 | `REDIS_URL` | Usually `redis://redis:6379` |
 | `SESSION_SECRET` | Long random string; signs session cookies |
 | `AUTH_INITIAL_USERNAME` / `AUTH_INITIAL_PASSWORD` | **Only** when `dashboard_users` is empty — creates the first admin |
-| `SESSION_COOKIE_SECURE` | Optional: set `true` when terminating HTTPS in Caddy so cookies are `Secure` |
+| `SITE_ADDRESS` | Public hostname for Caddy (e.g. `yourname.duckdns.org`). Required for TLS in Compose; must match DNS **A** record to this server. |
+| `SESSION_COOKIE_SECURE` | Set **`true`** when users only use **HTTPS** so session cookies are `Secure` (recommended with TLS). |
 
 **Critical:** The username in `DATABASE_URL` must **match** `POSTGRES_USER`. A mismatch causes `password authentication failed` or `role "hkjc" does not exist`.
 
@@ -367,18 +371,69 @@ docker compose exec -T postgres pg_dump -U YOUR_USER -d hkjc_dashboard --no-owne
 | **`git pull`**: `untracked working tree files would be overwritten` | Local untracked files (e.g. `backup.sql`) **same path** as files coming from the remote branch | Move or `rm` those files, then `git pull` again ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
 | **`git pull` / `git push`**: `Password authentication is not supported` | GitHub **HTTPS** no longer accepts account passwords | Use a **Personal Access Token** as the password, or use **SSH** remote + SSH key ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
 | Site still **old UI** after deploy | No `docker compose up --build`, wrong folder, or browser cache | `git log -1`; `docker compose up -d --build`; hard refresh; use **port 80** not `:5173` ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
+| **`Blocked request. This host ("…") is not allowed`** | **Vite 8+** `server.allowedHosts` — reverse proxy sends real hostname | Set **`allowedHosts: true`** in `apps/frontend/vite.config.ts` under `server`, rebuild: `docker compose up -d --build frontend` ([§9.4](#94-common-https--vite-issues)) |
+| **`Set SITE_ADDRESS in .env`** (Compose error) | **`SITE_ADDRESS`** unset on server | Add to server `.env`: `SITE_ADDRESS=yourname.duckdns.org` (must match DNS) ([§9.2](#92-server-env-and-redeploy)) |
+| **HTTPS fails / ACME errors** | DNS not pointing here yet, or **80** blocked | Wait for DNS; ensure firewall allows **80** and **443**; `curl -I http://yourname.duckdns.org/.well-known/acme-challenge/` (after Caddy runs) ([§9](#9-https-with-a-hostname-optional)) |
+| Session lost after switching to HTTPS | Cookie not **Secure** | Set **`SESSION_COOKIE_SECURE=true`** in `.env` when using HTTPS only ([§9.2](#92-server-env-and-redeploy)) |
 
 ---
 
-## 9. Security reminders
+## 9. HTTPS with a hostname (optional)
+
+Use this when you want **`https://yourname.duckdns.org/`** (or any domain) instead of **`http://<IP>/`**. The stack uses **Caddy** with **automatic Let’s Encrypt** TLS when **`SITE_ADDRESS`** is set.
+
+### 9.1 DNS and firewall
+
+1. **Hostname** — A free option is **[DuckDNS](https://www.duckdns.org/)**: create a subdomain (e.g. `perry-in-hk.duckdns.org`) and set **current ip** to your **Linode public IPv4**. Paid registrars work the same way: **A record** → server IP.
+2. **Firewall** — Allow inbound **TCP 443** on the Linode Cloud Firewall (keep **22** and **80** as you already use **80** for HTTP and ACME HTTP-01 challenges).
+
+### 9.2 Server `.env` and redeploy
+
+On the server, **`SITE_ADDRESS` must exist** in `.env` (Compose passes it into Caddy). Example:
+
+```bash
+SITE_ADDRESS=yourname.duckdns.org
+SESSION_COOKIE_SECURE=true
+```
+
+Then:
+
+```bash
+cd ~/YOUR_REPO_FOLDER
+git pull origin main
+docker compose up -d --build
+```
+
+Open **`https://yourname.duckdns.org/`** (first certificate fetch may take a short time). **Do not commit** `.env`; copy these lines manually on the server if needed.
+
+The repo maps **`443:443`**, uses **`{$SITE_ADDRESS}`** in `infra/docker/Caddyfile`, and persists certificates in Docker volumes **`caddy_data`** / **`caddy_config`**.
+
+### 9.3 `VITE_WS_URL`
+
+The app **does not currently read `VITE_WS_URL` in code** (only documented in diagrams). If you add WebSockets later, from an **HTTPS** page use **`wss://`** and the **same host** as the site (and add a **`/ws`** route in Caddy to the backend if applicable). Until then, changing `VITE_WS_URL` is optional.
+
+### 9.4 Common HTTPS + Vite issues
+
+**`Blocked request. This host ("yourname.duckdns.org") is not allowed. To allow this host, add … to server.allowedHosts in vite.config`**
+
+- **Cause:** Vite **8+** rejects requests whose `Host` header is not in the default allowlist. **Caddy** forwards the browser’s host (your domain).
+- **Fix:** In `apps/frontend/vite.config.ts`, under `server`, set **`allowedHosts: true`** (or list your domain explicitly). Rebuild the **frontend** image:  
+  `docker compose up -d --build frontend` (or full `--build`).
+
+**Security note:** `allowedHosts` does not replace **login**, **firewall**, or **TLS** — it only relaxes Vite’s host check so the dev server works behind a reverse proxy. For stricter public hardening, consider serving a **`vite build`** static `dist/` via Caddy instead of **`vite dev`** in Docker (larger change).
+
+---
+
+## 10. Security reminders
 
 - Do **not** commit `.env` or share **secrets** (passwords, `SESSION_SECRET`, `OPENAI_API_KEY`, etc.) in public chats.
 - Restrict firewall **22** to your IP when possible.
 - Avoid exposing Postgres **5432** / Redis **6379** to the public internet in production-oriented setups.
+- **HTTPS:** Use strong **`AUTH_*`** / dashboard passwords; TLS and **`allowedHosts`** do not replace authentication. With HTTPS-only access, set **`SESSION_COOKIE_SECURE=true`** (see [§9](#9-https-with-a-hostname-optional)).
 
 ---
 
-## 10. One-page command list (happy path)
+## 11. One-page command list (happy path)
 
 ```text
 # Server: install Docker (official docs) → verify hello-world
@@ -391,6 +446,10 @@ cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSI
 docker compose up -d --build
 curl -sS http://127.0.0.1/health
 # Browser: http://<PUBLIC_IP>/
+
+# Optional HTTPS (see §9): DNS A → Linode IP; firewall 443; .env: SITE_ADDRESS=yourname.duckdns.org, SESSION_COOKIE_SECURE=true
+#   git pull && docker compose up -d --build
+#   Browser: https://yourname.duckdns.org/
 
 # Update later (after git push from PC): git pull origin main && docker compose up -d --build
 # If pull fails on untracked backup*.sql: move them out or rm, then pull again — see §6 D1
@@ -411,7 +470,7 @@ curl -sS http://127.0.0.1/health
 
 ---
 
-## References
+## 12. References
 
 - [Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
 - [Linode Cloud Firewall](https://www.linode.com/docs/guides/cloud-firewall/)

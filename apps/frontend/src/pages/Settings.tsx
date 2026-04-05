@@ -10,17 +10,9 @@ export default function Settings() {
         <h2 className="card-title">Settings</h2>
         <p className="muted">
           Day-to-day tuning uses the <strong>Realtime</strong> page (worker interval, sync) and{" "}
-          <strong>Scraper</strong> jobs. Secrets and infrastructure live in <code className="settings-inline-code">.env</code>{" "}
-          (see <code className="settings-inline-code">.env.example</code>): database URL,{" "}
-          <code className="settings-inline-code">SESSION_SECRET</code>,{" "}
-          <code className="settings-inline-code">AUTH_INITIAL_*</code> for the first admin only,{" "}
-          <code className="settings-inline-code">ODDS_SYNC_*</code>, <code className="settings-inline-code">OPENAI_*</code>{" "}
-          (including optional <code className="settings-inline-code">OPENAI_FORCE_JSON</code>),{" "}
-          <code className="settings-inline-code">AI_MOMENTUM_*</code> for the AI short-window odds-drop summary, and{" "}
-          <code className="settings-inline-code">VITE_*</code> for the web build (API base URL). The browser uses{" "}
-          <strong>session cookies</strong> (httpOnly) after sign-in — no shared API key in the bundle. Successful{" "}
-          <strong>智能分析</strong> runs are stored in PostgreSQL (<code className="settings-inline-code">hkjc_ai_analyses</code>)
-          for later review on the same tab.
+          <strong>Scraper</strong> jobs. Server-side configuration (database, sessions, integrations) is set in the
+          deployment environment — see your operator’s deployment notes or <code className="settings-inline-code">.env.example</code>{" "}
+          in the repository. Successful <strong>智能分析</strong> runs are stored for later review on the same tab.
         </p>
       </section>
 
@@ -31,8 +23,9 @@ export default function Settings() {
           <strong>first</strong> picture shows <strong>where configuration comes from</strong> (environment variables,
           Vite build-time values, and UI actions such as the Realtime worker interval). The <strong>second</strong> shows{" "}
           <strong>end-to-end data movement</strong> between you, the apps, saved data, and public HKJC sources. The{" "}
-          <strong>third</strong> shows the <strong>智能分析 (AI recommendation)</strong> path: prompt assembly (including
-          odds momentum from snapshots), JSON validation, saving to SQL, and reloading saved analyses. The{" "}
+          <strong>third</strong> shows the <strong>智能分析 (AI recommendation)</strong> path: assembling context
+          (including odds momentum from snapshots), checking the model reply, saving successful runs, and reloading
+          history. The{" "}
           <strong>fourth</strong> shows{" "}
           <strong>how the same project is turned into running software</strong> with Docker. Arrows are labeled in plain
           language.

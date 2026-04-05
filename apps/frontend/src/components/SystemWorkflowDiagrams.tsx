@@ -3,81 +3,79 @@ import mermaid from "mermaid";
 
 /** End-to-end data movement; edit to update the diagram. */
 export const SYSTEM_DATAFLOW_DIAGRAM = `flowchart TB
-  subgraph people [You]
-    user([Person using the dashboard])
+  subgraph you [You]
+    user([You in a web browser])
   end
-  subgraph outside [Outside this project]
-    hkjc{{HKJC public racing websites and APIs}}
+  subgraph public [Outside this product]
+    hkjc{{HKJC public racing sites and services}}
   end
-  subgraph dockerApps [Programs running in Docker]
-    fe[Web app screen]
-    be[Backend service and live odds sync]
-    scraper[Scraper service]
-    rec[Recommender service]
+  subgraph platform [What runs for HKJC Dashboard]
+    fe[Dashboard web app]
+    be[Backend: sign-in, charts, Realtime, Scraper controls, saved AI runs]
+    odds[Background timer: fetch live odds]
+    sc[Scraper sidecar: scheduled heartbeat to public HKJC pages]
   end
-  subgraph stores [Stored data]
-    pg[(PostgreSQL: odds snapshots merged history AI analyses)]
-    redis[(Redis reserved for future use)]
+  subgraph stores [Where information is kept]
+    pg[(PostgreSQL: race history, odds snapshots, merged form, saved analyses, sessions)]
+    redis[(Redis: defined for possible future caching)]
   end
-  user -->|opens pages and charts| fe
-  fe -->|API calls realtime views and scraper job requests| be
-  be -->|reads and writes tables and realtime data| pg
-  be -.->|future development| redis
-  be -->|pulls odds and race details| hkjc
-  scraper -->|downloads public pages| hkjc
-  scraper -->|writes history into the database| pg
-  rec -->|reads saved data| pg
+  user -->|open pages, run tools, refresh charts| fe
+  fe -->|signed-in requests over HTTPS| be
+  be -->|read charts, write jobs and analyses| pg
+  odds -->|pull odds and related fields on a schedule| hkjc
+  odds -->|append snapshots| pg
+  be -->|when you start imports scripts download pages| hkjc
+  be -->|merge and store new rows| pg
+  sc -->|every few minutes| hkjc
+  be -.->|not used by core features yet| redis
 `;
 
-/** Env, UI, and API: what you configure and where it applies. */
+/** Where settings and controls land: server config, build-time app settings, in-app actions. */
 export const SETTINGS_CONFIG_FLOW_DIAGRAM = `flowchart TB
-  subgraph cfgSrc [Configuration sources]
-    envHost[".env file and Compose env"]
-    viteEnv["Vite env at build time"]
+  subgraph cfgSrc [Where behaviour is set]
+    envHost[Server and deployment configuration]
+    viteEnv[Settings baked in when the web app is built]
   end
-  subgraph feLayer [Web app browser]
-    pages["Dashboard pages"]
+  subgraph feLayer [Your browser]
+    pages[Dashboard pages including Realtime worker and sync controls]
   end
-  subgraph beLayer [Backend container]
-    apiNode["REST API"]
-    oddsWorkerNode["Odds sync worker"]
+  subgraph beLayer [Backend]
+    apiNode[Application server: APIs and sign-in]
+    oddsWorkerNode[Timed odds sync running inside the backend]
   end
   subgraph persisted [Persisted data]
     pgStore[(PostgreSQL)]
   end
-  envHost -->|DATABASE_URL REDIS_URL SESSION_SECRET SCRAPER_ROOT| apiNode
-  envHost -->|AUTH_INITIAL for first admin only| apiNode
-  envHost -->|ODDS_SYNC ODDS_SYNC_ODDS_TYPES OPENAI OPENAI_FORCE_JSON AI_MOMENTUM| apiNode
-  envHost -->|ODDS_SYNC_INTERVAL_MS seeds worker| oddsWorkerNode
-  viteEnv -->|VITE_API_URL VITE_WS_URL| pages
-  pages -->|HTTP session cookie after login| apiNode
-  pages -->|PUT worker interval| apiNode
-  apiNode -->|in-memory worker interval until restart| oddsWorkerNode
-  apiNode -->|on-demand scraper jobs| pgStore
-  apiNode -->|insert AI analysis rows| pgStore
-  oddsWorkerNode -->|odds snapshots| pgStore
+  envHost -->|database, sessions, integrations, scraper paths| apiNode
+  envHost -->|timer and pool types for live odds| oddsWorkerNode
+  viteEnv -->|which server URL the browser calls| pages
+  pages -->|signed-in requests and in-page tuning| apiNode
+  apiNode -->|tells the timer how often to run| oddsWorkerNode
+  apiNode -->|on-demand jobs and AI saves| pgStore
+  oddsWorkerNode -->|writes odds snapshots| pgStore
 `;
 
 /** How images are built and containers start; edit to update the diagram. */
 export const DOCKER_BUILD_RUN_DIAGRAM = `flowchart TB
   subgraph inputs [What you provide]
-    folder[Project folder with source code]
-    envfile[.env file with database URL and secrets]
+    folder[Project source code]
+    envfile[Environment file for database and secrets]
   end
-  subgraph buildPhase [Build step]
-    cmdBuild["docker compose build"]
-    dockerfiles[Dockerfiles under infra/docker]
-    images[Container images]
+  subgraph buildPhase [Build]
+    cmdBuild[Build container images]
+    dockerfiles[Docker build recipes]
+    images[Ready-to-run images]
   end
-  subgraph runPhase [Run step]
-    cmdUp["docker compose up"]
-    waitDb[Postgres is ready and healthy]
-    waitBe[Backend is healthy on port 4000]
-    waitFe[Frontend is up on host port 5173]
-    waitJobs[Scraper and recommender start after database and API]
+  subgraph runPhase [Start order]
+    cmdUp[Start the stack]
+    waitDb[Database ready]
+    waitBe[Backend ready]
+    waitFe[Web app ready]
+    waitProxy[Optional: reverse proxy for HTTPS in production]
+    waitJobs[Helper services: scraper and recommender containers]
   end
-  subgraph result [What you get]
-    browserNote[Browser opens the web app same-origin /api via Caddy or Vite proxy in dev]
+  subgraph result [Outcome]
+    browserNote[You open the dashboard; the browser talks to the API on the same site address]
   end
   folder --> cmdBuild
   envfile --> cmdBuild
@@ -87,47 +85,48 @@ export const DOCKER_BUILD_RUN_DIAGRAM = `flowchart TB
   cmdUp --> waitDb
   waitDb --> waitBe
   waitBe --> waitFe
+  waitBe --> waitProxy
   waitBe --> waitJobs
   waitFe --> browserNote
+  waitProxy --> browserNote
   waitJobs --> browserNote
 `;
 
-/** Smart analysis: context + momentum → LLM JSON → validate → save → UI; optional reload from SQL. */
+/** 智能分析: assemble context → external AI → check → save → reload saved runs. */
 export const AI_RECOMMENDATION_FLOW_DIAGRAM = `flowchart TB
   subgraph userAi [You]
-    userAiNode([Person using the dashboard])
+    userAiNode([You])
   end
-  subgraph webAi [Web app]
-    aiTab[智能分析: tabs and saved-analysis picker]
+  subgraph webAi [智能分析 in the web app]
+    aiTab[Choose meeting and race; run analysis or open a saved run]
   end
   subgraph beAi [Backend]
-    aiPost["POST /api/ai/analyze"]
-    buildCtx[Build prompt: racecard form pools Odds momentum window from snapshots]
-    validate[Zod JSON schema and fixed Markdown render]
-    aiGet["GET /api/ai/saved"]
+    buildCtx[Assemble context: saved form, odds history and momentum, optional live race card]
+    validate[Check the model reply matches the expected structure]
+    saveRun[Store a successful run for later]
+    loadSaved[List or load past runs]
   end
-  subgraph storesAi [Stored data]
-    pgAi[(PostgreSQL: snapshots history hkjc_ai_analyses)]
+  subgraph storesAi [Database]
+    pgAi[(Stored snapshots, history, and saved analysis runs)]
   end
   subgraph hkjcAi [HKJC]
-    gqlAi{{HKJC GraphQL: racecard and pools}}
+    gqlAi{{HKJC services when live detail is needed}}
   end
-  subgraph llmOut [External AI]
-    openaiApi{{OpenAI-compatible API: JSON object mode when enabled}}
+  subgraph llmOut [External AI provider]
+    openaiApi{{AI model you configure on the server}}
   end
-  userAiNode -->|open tab pick meeting race| aiTab
-  aiTab -->|HTTP session cookie| aiPost
-  aiPost --> buildCtx
-  buildCtx -->|read snapshots form rows momentum query| pgAi
-  buildCtx -->|live runners when needed| gqlAi
-  buildCtx -->|system and user messages| openaiApi
-  openaiApi -->|JSON matching schema| validate
-  validate -->|insert successful run| pgAi
-  validate -->|text structured meta saved_id| aiPost
-  aiPost -->|response| aiTab
-  aiTab -->|list or load prior run| aiGet
-  aiGet -->|read rows| pgAi
-  aiGet -->|same shape as analyze| aiTab
+  userAiNode -->|open the tab| aiTab
+  aiTab -->|signed-in request to run| buildCtx
+  buildCtx -->|read race and odds history| pgAi
+  buildCtx -->|fetch live card or pools when needed| gqlAi
+  buildCtx -->|send prompt| openaiApi
+  openaiApi -->|model answer| validate
+  validate -->|if valid| saveRun
+  saveRun -->|keep copy| pgAi
+  validate -->|show sections in the tab| aiTab
+  aiTab -->|browse history| loadSaved
+  loadSaved -->|read prior runs| pgAi
+  loadSaved -->|display| aiTab
 `;
 
 export default function SystemWorkflowDiagrams() {
@@ -217,18 +216,13 @@ export default function SystemWorkflowDiagrams() {
             ref={settingsFlowRef}
             className="settings-mindmap-svg"
             role="img"
-            aria-label="Where environment variables and UI actions configure the backend and database"
+            aria-label="How server configuration, build-time settings, and in-app controls reach the backend and database"
           />
         </div>
         <p className="settings-diagram-caption muted">
-          The <strong>Scraper</strong> page and <strong>Realtime</strong> bulk horse-history action call the same API
-          that spawns scraper scripts inside the backend container (<code className="settings-inline-code">SCRAPER_ROOT</code>
-          ). A separate <code className="settings-inline-code">scraper</code> Compose service can still run batch jobs;
-          both write into PostgreSQL. <strong>智能分析</strong> uses server-side{" "}
-          <code className="settings-inline-code">OPENAI_*</code>, optional{" "}
-          <code className="settings-inline-code">OPENAI_FORCE_JSON</code>, and{" "}
-          <code className="settings-inline-code">AI_MOMENTUM_*</code> for the short-window odds-drop block; successful runs
-          are stored in <code className="settings-inline-code">hkjc_ai_analyses</code>.
+          Operator settings cover the database, sign-in, scraper paths, and AI credentials. The web build decides which API
+          address the browser calls. Day-to-day tuning (for example the Realtime odds timer) happens on{" "}
+          <strong>Realtime</strong> and flows through the backend into the timed worker and the database.
         </p>
       </div>
 
@@ -244,13 +238,15 @@ export default function SystemWorkflowDiagrams() {
             ref={dataFlowRef}
             className="settings-mindmap-svg"
             role="img"
-            aria-label="Data flow through HKJC Dashboard"
+            aria-label="End-to-end path from you in the browser through the app, HKJC sources, and stored data"
           />
         </div>
         <p className="settings-diagram-caption muted">
-          Realtime reads odds snapshots from PostgreSQL. The <strong>Scraper</strong> UI and <strong>Realtime</strong>{" "}
-          can start horse-details or historical jobs on the backend. Typical host ports: web <strong>5173</strong>, API{" "}
-          <strong>4000</strong> (see <code className="settings-inline-code">docker-compose.yml</code>).
+          <strong>Realtime</strong> charts read odds snapshots that the background timer keeps appending after it pulls
+          from HKJC. Heavy imports (historical dates or horse-detail pages) are started from the <strong>Scraper</strong>{" "}
+          page and run as scripts on the backend, which writes into the same database. A small scraper container also
+          performs a periodic heartbeat to HKJC; Compose may start a recommender container, but it is idle and does not
+          drive the UI today.
         </p>
       </div>
 
@@ -266,16 +262,14 @@ export default function SystemWorkflowDiagrams() {
             ref={aiRecRef}
             className="settings-mindmap-svg"
             role="img"
-            aria-label="AI recommendation request flow from browser to backend, database, HKJC, and LLM"
+            aria-label="智能分析 flow from your choices to context assembly, external AI, checks, saved runs, and history"
           />
         </div>
         <p className="settings-diagram-caption muted">
-          The backend holds <code className="settings-inline-code">OPENAI_API_KEY</code> only (never exposed to the
-          browser). Default path uses <strong>JSON</strong> from the model, <strong>Zod</strong> validation, a fixed
-          Markdown template, and <strong>tabbed sections</strong> in the UI. QPL/QIN appear when snapshots include those
-          pools (<code className="settings-inline-code">ODDS_SYNC_ODDS_TYPES</code>). Each successful run is written to{" "}
-          <code className="settings-inline-code">hkjc_ai_analyses</code>; the page can reload past runs via{" "}
-          <code className="settings-inline-code">GET /api/ai/saved</code>.
+          The server builds a structured prompt from saved form, odds history (including a short momentum window when data
+          exists), and live HKJC details when needed. The AI reply is checked before it is shown and stored so you can
+          reopen past runs from the same tab. Extra pool types in the analysis appear when those pools exist in stored
+          snapshots.
         </p>
       </div>
 
@@ -291,9 +285,13 @@ export default function SystemWorkflowDiagrams() {
             ref={buildRef}
             className="settings-mindmap-svg"
             role="img"
-            aria-label="Docker build and run workflow"
+            aria-label="From source and configuration to built images, containers starting in order, and opening the site"
           />
         </div>
+        <p className="settings-diagram-caption muted">
+          Local development often uses the dev server and a direct API port; production commonly puts the web app and API
+          behind one hostname so the browser stays on a single address.
+        </p>
       </div>
     </div>
   );
