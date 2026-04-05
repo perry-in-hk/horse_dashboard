@@ -39,7 +39,7 @@ export default function Login() {
     <div className="login-page">
       <div className="card login-card">
         <h1 className="card-title">Sign in</h1>
-        <p className="muted login-lead">HKJC Dashboard — session cookie (httpOnly), not shared API keys in the browser.</p>
+        <p className="muted login-lead">HKJC Dashboard</p>
         <form className="login-form" onSubmit={onSubmit}>
           <label className="login-label">
             Username

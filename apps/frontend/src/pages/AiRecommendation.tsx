@@ -128,8 +128,8 @@ const AI_REC_FOOTNOTE = (
     根據即時馬匹名單、資料庫近績（合併歷史），以及最新賠率快照中的獨贏／位置與<strong>連贏（QIN）／位置Q（QPL）</strong>
     組合（若有同步）。分析以<strong>繁體中文</strong>輸出，並含「位置Q（QPL）與連贏（QIN）」專節（以位置Q為重點），以及「
     <strong>職業馬迷視角：假設性彩池取向</strong>」與「<strong>大注資金流追蹤（短時間賠率急跌）</strong>」專節——會寫明模擬的
-    <strong>獨贏、位置、QPL、QIN</strong>具體馬號／組合（教學示範，非保證）。後端需設定 <code>OPENAI_API_KEY</code>。若需 QPL／QIN
-    賠率，請在 <code>ODDS_SYNC_ODDS_TYPES</code> 包含 <code>QIN,QPL</code> 並於 Realtime 同步該場。
+    <strong>獨贏、位置、QPL、QIN</strong>具體馬號／組合（教學示範，非保證）。智能分析需由伺服器啟用 AI 服務。若需 QPL／QIN
+    賠率，請於 Realtime 同步包含該等彩池之場次。
   </>
 );
 

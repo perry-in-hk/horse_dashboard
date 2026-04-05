@@ -54,9 +54,7 @@ export default function UserAdminSection() {
     <section className="card settings-intro">
       <h2 className="card-title">Users (admin)</h2>
       <p className="muted">
-        Create additional accounts. The first admin is created on the server from{" "}
-        <code className="settings-inline-code">AUTH_INITIAL_USERNAME</code> /{" "}
-        <code className="settings-inline-code">AUTH_INITIAL_PASSWORD</code> when the database has no users.
+        Create additional accounts. The first administrator is provisioned during initial deployment when no users exist yet.
       </p>
 
       <form className="user-admin-form" onSubmit={onSubmit}>

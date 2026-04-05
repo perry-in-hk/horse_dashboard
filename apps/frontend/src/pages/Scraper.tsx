@@ -160,9 +160,8 @@ export default function Scraper() {
             disabled={busy !== null || status?.["horse-details"]?.running != null}
           />
           <p style={{ margin: "0 0 16px", fontSize: 12, color: "#64748b" }}>
-            Leave empty to scrape every distinct <code>horse_code</code> in <code>hkjc_horse_race_history</code>.
-            Use <code>SCRAPER_HORSE_CODES_SOURCE=file</code> in the environment for the legacy{" "}
-            <code>horse_codes_unique.txt</code> list instead.
+            Leave empty to scrape every horse code found in merged race history. Your operator can switch to a file-backed
+            code list in server configuration if needed.
           </p>
           <button
             type="button"
@@ -179,11 +178,6 @@ export default function Scraper() {
         <button type="button" className="btn btn-ghost" onClick={refresh}>
           Refresh status
         </button>
-        {status?.historical && (
-          <span style={{ marginLeft: 12, fontSize: 13, color: "#64748b" }}>
-            Scraper root: {status.historical.scraperRoot}
-          </span>
-        )}
       </div>
 
       {status && (
