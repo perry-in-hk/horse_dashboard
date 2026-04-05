@@ -2,8 +2,8 @@ import { NavLink, Routes, Route, Navigate } from "react-router-dom";
 import Analysis from "./pages/Analysis.tsx";
 import Compare from "./pages/Compare.tsx";
 import Database from "./pages/Database.tsx";
-import Stub from "./pages/Stub.tsx";
 import Scraper from "./pages/Scraper.tsx";
+import AiRecommendation from "./pages/AiRecommendation.tsx";
 import Realtime from "./pages/Realtime.tsx";
 import Settings from "./pages/Settings.tsx";
 
@@ -13,7 +13,7 @@ const tabs = [
   { to: "/database", label: "Database" },
   { to: "/scraper", label: "Scraper" },
   { to: "/realtime", label: "Realtime" },
-  { to: "/ai", label: "AI Recommendation" },
+  { to: "/ai", label: "智能分析" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
@@ -38,7 +38,7 @@ export default function App() {
           <Route path="/database" element={<Database />} />
           <Route path="/scraper" element={<Scraper />} />
           <Route path="/realtime" element={<Realtime />} />
-          <Route path="/ai" element={<Stub title="AI Recommendation" />} />
+          <Route path="/ai" element={<AiRecommendation />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/analysis" replace />} />
         </Routes>

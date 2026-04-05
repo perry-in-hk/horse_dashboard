@@ -10,6 +10,7 @@ const TABLE_ALLOWLIST = new Set([
   "hkjc_horse_details",
   "hkjc_horse_race_history",
   "hkjc_merged_race_data",
+  "hkjc_ai_analyses",
 ]);
 
 // ---- List public tables with row counts -------------------------------------

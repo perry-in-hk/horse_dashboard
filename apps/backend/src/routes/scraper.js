@@ -126,7 +126,7 @@ router.post("/run", express.json(), async (req, res) => {
   if (key !== "historical" && key !== "horse-details") {
     return res.status(400).json({
       error:
-        'Body must be JSON: { "script": "historical" | "horse-details", "dates"?: string[], "horseCodes"?: string[] }',
+        'Body must be JSON: { "script": "historical" | "horse-details", "dates"?: string[], "horseCodes"?: string[], "horseDetailsSkipScraped"?: boolean }',
     });
   }
   if (active.has(key)) {
@@ -162,6 +162,12 @@ router.post("/run", express.json(), async (req, res) => {
     } else {
       // Clear any inherited list; force DB distinct codes (override .env file source).
       extraEnv = { SCRAPER_HORSE_CODES: "", SCRAPER_HORSE_CODES_SOURCE: "db" };
+    }
+    const skip = req.body?.horseDetailsSkipScraped;
+    if (skip === false) {
+      extraEnv = { ...extraEnv, SCRAPER_HORSE_DETAILS_SKIP_SCRAPED: "false" };
+    } else if (skip === true) {
+      extraEnv = { ...extraEnv, SCRAPER_HORSE_DETAILS_SKIP_SCRAPED: "true" };
     }
   }
 

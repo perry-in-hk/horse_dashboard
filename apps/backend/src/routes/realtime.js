@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db.js";
-import { getHorseRacingApi } from "../lib/hkjcOddsClient.js";
+import { fetchRaceRunnersForRace, getHorseRacingApi } from "../lib/hkjcOddsClient.js";
 import {
   getActiveIntervalTarget,
   getActiveIntervalTargets,
@@ -37,10 +37,21 @@ const raceKeyQuery = z.object({
   race_no: z.coerce.number().int().positive(),
 });
 
-const historyQuery = raceKeyQuery.extend({
-  since: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(500).optional().default(200),
-});
+const historyQuery = raceKeyQuery
+  .extend({
+    since: z.string().optional(),
+    limit: z.coerce.number().int().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.since != null && data.since !== "" && Number.isNaN(Date.parse(data.since))) {
+      ctx.addIssue({ code: "custom", path: ["since"], message: "Invalid since timestamp" });
+    }
+    const cap = data.since ? 5000 : 500;
+    const lim = data.limit ?? 200;
+    if (lim > cap) {
+      ctx.addIssue({ code: "custom", path: ["limit"], message: `limit must be at most ${cap}` });
+    }
+  });
 
 const meetingKeyQuery = z.object({
   meeting_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -80,6 +91,24 @@ router.get("/meetings", async (_req, res, next) => {
     const api = getHorseRacingApi();
     const meetings = await api.getActiveMeetings();
     res.json({ meetings });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Live racecard runners (horse name + code) for one race via HKJC GraphQL. */
+router.get("/race-runners", async (req, res, next) => {
+  try {
+    const parsed = raceKeyQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+    }
+    const q = parsed.data;
+    const runners = await fetchRaceRunnersForRace(q.meeting_date, q.venue_code, q.race_no);
+    if (runners == null) {
+      return res.status(404).json({ error: "Meeting or race not found" });
+    }
+    res.json({ runners });
   } catch (e) {
     next(e);
   }
@@ -204,6 +233,7 @@ router.get("/history", async (req, res, next) => {
       return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
     }
     const q = parsed.data;
+    const limit = q.limit ?? 200;
     const params = [q.meeting_date, q.venue_code, q.race_no];
     let sql = `SELECT id, observed_at, meeting_date, venue_code, race_no, odds_types, payload_hash, payload
        FROM hkjc_odds_snapshots
@@ -212,11 +242,12 @@ router.get("/history", async (req, res, next) => {
       sql += ` AND observed_at >= $4::timestamptz`;
       params.push(q.since);
     }
-    sql += ` ORDER BY observed_at ASC LIMIT $${params.length + 1}`;
-    params.push(q.limit);
+    sql += ` ORDER BY observed_at DESC LIMIT $${params.length + 1}`;
+    params.push(limit);
 
     const r = await pool.query(sql, params);
-    res.json({ snapshots: r.rows });
+    const snapshots = [...r.rows].reverse();
+    res.json({ snapshots });
   } catch (e) {
     next(e);
   }

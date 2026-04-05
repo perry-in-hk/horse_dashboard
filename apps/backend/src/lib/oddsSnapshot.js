@@ -43,6 +43,11 @@ export function hashPayload(obj) {
   return crypto.createHash("sha256").update(canonicalJson(obj)).digest("hex");
 }
 
+/** When true, skip INSERT if payload hash matches the latest row (saves DB rows; Realtime has no new point when odds unchanged). */
+function oddsSnapshotInsertOnlyOnChange() {
+  return process.env.ODDS_SNAPSHOT_INSERT_ONLY_ON_CHANGE === "true";
+}
+
 /**
  * @param {import("pg").Pool} pool
  * @param {{ meetingDate: string; venueCode: string; raceNo: number; oddsTypes: string[]; payload: unknown }} row
@@ -53,16 +58,17 @@ export async function insertSnapshotIfChanged(pool, row) {
   const payload = sanitizePayloadForDb(rawPayload);
   const hash = hashPayload(payload);
 
-  const prev = await pool.query(
-    `SELECT payload_hash FROM hkjc_odds_snapshots
-     WHERE meeting_date = $1::date AND venue_code = $2 AND race_no = $3 AND odds_types = $4::text[]
-     ORDER BY observed_at DESC
-     LIMIT 1`,
-    [meetingDate, venueCode, raceNo, oddsTypes]
-  );
-
-  if (prev.rows[0]?.payload_hash === hash) {
-    return { inserted: false };
+  if (oddsSnapshotInsertOnlyOnChange()) {
+    const prev = await pool.query(
+      `SELECT payload_hash FROM hkjc_odds_snapshots
+       WHERE meeting_date = $1::date AND venue_code = $2 AND race_no = $3 AND odds_types = $4::text[]
+       ORDER BY observed_at DESC
+       LIMIT 1`,
+      [meetingDate, venueCode, raceNo, oddsTypes]
+    );
+    if (prev.rows[0]?.payload_hash === hash) {
+      return { inserted: false };
+    }
   }
 
   const ins = await pool.query(

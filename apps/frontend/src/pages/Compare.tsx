@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import { apiFetch } from "../api/client.ts";
 
@@ -27,8 +28,10 @@ interface RaceRow {
   margin: string | null;
   running_positions: string | null;
   race_distance: number | null;
+  /** Parsed from horse-history finish time when speed_mps is computed */
   time_seconds: number | null;
   speed_mps: number | null;
+  hist_finish_time?: string | null;
   position_int: number | null;
   race_score: number;
 }
@@ -61,11 +64,30 @@ interface CompareResponse {
   horses: HorseCompare[];
 }
 
-const SERIES_COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
+const MAX_COMPARE_HORSES = 14;
+
+const SERIES_COLORS = [
+  "#3b82f6",
+  "#f59e0b",
+  "#10b981",
+  "#ef4444",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#84cc16",
+  "#f97316",
+  "#a855f7",
+  "#14b8a6",
+  "#eab308",
+  "#64748b",
+  "#f43f5e",
+];
 
 /* ── Component ───────────────────────────────────────────────────────────── */
 
 export default function Compare() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<{ code: string; name: string }[]>([]);
   const [horseList, setHorseList] = useState<SearchResult[]>([]);
   const [listPick, setListPick] = useState("");
@@ -78,6 +100,14 @@ export default function Compare() {
   useEffect(() => {
     apiFetch<SearchResult[]>("/api/analytics/horses/list?limit=8000").then(setHorseList).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const st = location.state as { comparePreset?: { horses?: { code: string; name: string }[] } } | undefined;
+    const horses = st?.comparePreset?.horses;
+    if (!horses?.length) return;
+    setSelected(horses.slice(0, MAX_COMPARE_HORSES));
+    navigate({ pathname: "/compare", search: location.search }, { replace: true, state: {} });
+  }, [location.state, location.search, navigate]);
 
   /* ── Search ──────────────────────────────────────────────────────────── */
 
@@ -100,7 +130,7 @@ export default function Compare() {
 
   const addHorse = useCallback(
     (code: string, name: string) => {
-      if (selected.length >= 6 || selected.some((s) => s.code === code)) return;
+      if (selected.length >= MAX_COMPARE_HORSES || selected.some((s) => s.code === code)) return;
       setSelected((prev) => [...prev, { code, name }]);
       setSearchQ("");
       setSearchResults([]);
@@ -314,7 +344,7 @@ export default function Compare() {
           id="compare-horse-list"
           className="select-horse"
           value={listPick}
-          disabled={selected.length >= 6}
+          disabled={selected.length >= MAX_COMPARE_HORSES}
           onChange={(e) => {
             const code = e.target.value;
             setListPick("");
@@ -338,7 +368,7 @@ export default function Compare() {
             placeholder="Or search name / code…"
             value={searchQ}
             onChange={(e) => onSearchInput(e.target.value)}
-            disabled={selected.length >= 6}
+            disabled={selected.length >= MAX_COMPARE_HORSES}
           />
           {searchResults.length > 0 && (
             <div className="search-results">
@@ -356,7 +386,9 @@ export default function Compare() {
           {loading ? "Loading..." : "Compare"}
         </button>
 
-        <span style={{ fontSize: 12, color: "#64748b" }}>{selected.length}/6 selected</span>
+        <span style={{ fontSize: 12, color: "#64748b" }}>
+          {selected.length}/{MAX_COMPARE_HORSES} selected
+        </span>
       </div>
 
       {/* Selected chips */}
@@ -466,7 +498,7 @@ export default function Compare() {
         <div className="card" style={{ marginBottom: 20 }}>
           <h3 className="card-title">Average Speed by Race Distance</h3>
           <p style={{ color: "#64748b", fontSize: 13, margin: "0 0 16px" }}>
-            Uses merged history distance and finish time. Races without a matched distance or parseable time are omitted.
+            Uses horse-history distance and finish time only (same row). Races missing either field in history are omitted.
           </p>
           {speedByDistanceChart ? (
             <div className="chart-wrapper">
@@ -474,7 +506,7 @@ export default function Compare() {
             </div>
           ) : (
             <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
-              No speed-by-distance data for the selected horses (need history distance and a valid finish time per start).
+              No speed-by-distance data for the selected horses (each start needs both history distance and history finish time).
             </p>
           )}
         </div>
@@ -485,7 +517,9 @@ export default function Compare() {
       )}
 
       {selected.length === 0 && (
-        <p style={{ color: "#64748b" }}>Search and select 1–6 horses above to compare their performance side-by-side.</p>
+        <p style={{ color: "#64748b" }}>
+          Search and select 1–{MAX_COMPARE_HORSES} horses above to compare their performance side-by-side.
+        </p>
       )}
     </div>
   );

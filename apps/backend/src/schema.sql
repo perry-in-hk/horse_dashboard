@@ -295,3 +295,21 @@ CREATE INDEX IF NOT EXISTS idx_hkjc_odds_snapshots_lookup
 
 CREATE INDEX IF NOT EXISTS idx_hkjc_odds_snapshots_dedup
   ON hkjc_odds_snapshots (meeting_date, venue_code, race_no, odds_types);
+
+-- AI race analysis snapshots (persisted for review; one row per successful /api/ai/analyze)
+CREATE TABLE IF NOT EXISTS hkjc_ai_analyses (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  meeting_date DATE NOT NULL,
+  venue_code TEXT NOT NULL,
+  race_no INT NOT NULL,
+  output_format TEXT NOT NULL,
+  markdown_text TEXT NOT NULL,
+  structured_json JSONB,
+  model TEXT,
+  usage_json JSONB,
+  meta_json JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_ai_analyses_race_time
+  ON hkjc_ai_analyses (meeting_date, venue_code, race_no, created_at DESC);

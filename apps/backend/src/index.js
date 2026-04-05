@@ -9,6 +9,7 @@ import analyticsRouter from "./routes/analytics.js";
 import dbRouter from "./routes/db.js";
 import scraperRouter from "./routes/scraper.js";
 import realtimeRouter from "./routes/realtime.js";
+import aiRouter from "./routes/ai.js";
 import { startOddsSyncWorker } from "./oddsSyncWorker.js";
 
 const app = express();
@@ -30,6 +31,7 @@ app.use("/api/analytics", analyticsRouter);
 app.use("/api/db", dbRouter);
 app.use("/api/scraper", scraperRouter);
 app.use("/api/realtime", realtimeRouter);
+app.use("/api/ai", aiRouter);
 
 app.get("/health", async (_, res) => {
   await pool.query("SELECT 1");

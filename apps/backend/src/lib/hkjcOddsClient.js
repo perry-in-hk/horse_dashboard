@@ -23,6 +23,45 @@ export async function fetchMeetingWithRunners(date, venueCode) {
   return meetings[0];
 }
 
+/**
+ * Map a GraphQL racecard runner (see horseQuery runners fields) to API shape.
+ * @param {unknown} ru
+ * @returns {{ no: number, horse_name: string, horse_code: string }}
+ */
+export function normalizeRacecardRunner(ru) {
+  const no = parseInt(String(ru?.no ?? "").trim(), 10);
+  const code = String(ru?.horse?.code ?? "").trim().toUpperCase();
+  const name =
+    String(ru?.name_en ?? ru?.name_ch ?? "")
+      .trim()
+      .replace(/\s+/g, " ") || code || "";
+  return {
+    no: Number.isFinite(no) ? no : 0,
+    horse_name: name || "?",
+    horse_code: code,
+  };
+}
+
+/**
+ * Runners for one race from live racecard (HKJC GraphQL).
+ * @param {string} meetingDate YYYY-MM-DD
+ * @param {string} venueCode
+ * @param {number} raceNo
+ * @returns {Promise<{ no: number, horse_name: string, horse_code: string }[] | null>}
+ *   `null` if meeting or race is missing.
+ */
+export async function fetchRaceRunnersForRace(meetingDate, venueCode, raceNo) {
+  const meeting = await fetchMeetingWithRunners(meetingDate, venueCode);
+  if (!meeting) return null;
+  const race = meeting.races?.find((r) => parseInt(String(r.no), 10) === raceNo);
+  if (!race) return null;
+  const runners = (race.runners ?? [])
+    .map(normalizeRacecardRunner)
+    .filter((r) => r.horse_code);
+  runners.sort((a, b) => a.no - b.no);
+  return runners;
+}
+
 function poolHasNodes(pool) {
   return Array.isArray(pool?.oddsNodes) && pool.oddsNodes.length > 0;
 }

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import PairOddsMatrix, { buildPairCellMap, type PairPoolType } from "../components/PairOddsMatrix.tsx";
 import { normalizePairKeyFromComb } from "../lib/pairComb.ts";
@@ -7,8 +8,15 @@ import { apiFetch } from "../api/client.ts";
 const LS_REFRESH_KEY = "hkjc_realtime_refresh_ms";
 const REFRESH_CHOICES_MS = [5000, 10000, 15000, 30000, 60000] as const;
 const DEFAULT_REFRESH_MS = 10000;
+const LS_TIMELINE_HOURS_KEY = "hkjc_realtime_timeline_hours";
+const TIMELINE_HOURS_CHOICES = [1, 3, 6, 12, 24, 48] as const;
+const DEFAULT_TIMELINE_HOURS = 12;
+/** Must match server max limit when `since` is set. */
+const HISTORY_LIMIT_WITH_SINCE = 5000;
 const MAX_CHART_SERIES = 18;
 const MAX_PAIR_TIMELINE_SERIES = 12;
+/** Must match Compare page cap when sending a full field to Horse Comparison. */
+const MAX_COMPARE_HORSES = 14;
 
 const POOL_OPTIONS = ["WIN", "PLA", "QIN", "QPL", "FCT", "TCE", "TRI", "FF", "QTT", "DBL"] as const;
 
@@ -61,6 +69,16 @@ interface HistoryResponse {
 
 interface SnapshotCountsResponse {
   counts: { race_no: number; n: number }[];
+}
+
+interface RacecardRunner {
+  no: number;
+  horse_name: string;
+  horse_code: string;
+}
+
+interface RaceRunnersResponse {
+  runners: RacecardRunner[];
 }
 
 interface SettingsResponse {
@@ -122,6 +140,19 @@ function readRefreshMs(): number {
     return allowed.includes(n) ? n : DEFAULT_REFRESH_MS;
   } catch {
     return DEFAULT_REFRESH_MS;
+  }
+}
+
+function readTimelineHours(): number {
+  try {
+    const v = localStorage.getItem(LS_TIMELINE_HOURS_KEY);
+    if (!v) return DEFAULT_TIMELINE_HOURS;
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n)) return DEFAULT_TIMELINE_HOURS;
+    const allowed = TIMELINE_HOURS_CHOICES as readonly number[];
+    return allowed.includes(n) ? n : DEFAULT_TIMELINE_HOURS;
+  } catch {
+    return DEFAULT_TIMELINE_HOURS;
   }
 }
 
@@ -258,7 +289,56 @@ function inferPairFieldSize(
   return Math.min(24, Math.max(2, max || 14));
 }
 
+/** Best-effort: per-race fetch; merge runners in race order and dedupe horse_code. */
+async function fetchRunnersForMeetingRaces(
+  meetingDate: string,
+  venueCode: string,
+  raceNumbers: number[]
+): Promise<{ codes: string[]; raceErrors: { race_no: number; message: string }[] }> {
+  const results = await Promise.all(
+    raceNumbers.map(async (race_no) => {
+      const qs = new URLSearchParams({
+        meeting_date: meetingDate,
+        venue_code: venueCode,
+        race_no: String(race_no),
+      });
+      try {
+        const r = await apiFetch<RaceRunnersResponse>(`/api/realtime/race-runners?${qs}`);
+        return { race_no, runners: r.runners ?? [], error: null as string | null };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        return { race_no, runners: [] as RacecardRunner[], error: message };
+      }
+    })
+  );
+  const raceErrors = results
+    .filter((x) => x.error)
+    .map((x) => ({ race_no: x.race_no, message: x.error! }));
+  const sorted = [...results].sort((a, b) => a.race_no - b.race_no);
+  const seen = new Set<string>();
+  const codes: string[] = [];
+  for (const { runners } of sorted) {
+    for (const r of runners) {
+      const c = String(r.horse_code ?? "").trim().toUpperCase();
+      if (!c || seen.has(c)) continue;
+      seen.add(c);
+      codes.push(c);
+    }
+  }
+  return { codes, raceErrors };
+}
+
+interface ScraperStatusResponse {
+  "horse-details": { running: { pid: number } | null };
+}
+
+function formatHorseCodeDisplay(code: string | undefined): string {
+  const s = String(code ?? "").trim();
+  return s ? s.toUpperCase() : "—";
+}
+
 export default function Realtime() {
+  const navigate = useNavigate();
   const [meetings, setMeetings] = useState<ActiveMeeting[]>([]);
   const [meetingsErr, setMeetingsErr] = useState<string | null>(null);
   const [meetingIdx, setMeetingIdx] = useState(0);
@@ -266,6 +346,7 @@ export default function Realtime() {
   const [chartPool, setChartPool] = useState<PoolOption>("WIN");
   const [tablePool, setTablePool] = useState<PoolOption>("WIN");
   const [refreshMs, setRefreshMs] = useState(() => readRefreshMs());
+  const [timelineHours, setTimelineHours] = useState(() => readTimelineHours());
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
@@ -279,6 +360,17 @@ export default function Realtime() {
   const [loading, setLoading] = useState(false);
   const [raceSnapshotCounts, setRaceSnapshotCounts] = useState<Record<number, number>>({});
   const [pairSelected, setPairSelected] = useState<Set<string>>(() => new Set());
+  const [raceRunners, setRaceRunners] = useState<RacecardRunner[]>([]);
+  const [raceRunnersLoading, setRaceRunnersLoading] = useState(false);
+  const [raceRunnersErr, setRaceRunnersErr] = useState<string | null>(null);
+  const [bulkHorseDetailsLoading, setBulkHorseDetailsLoading] = useState(false);
+  const [bulkHorseDetailsMsg, setBulkHorseDetailsMsg] = useState<string | null>(null);
+  const [bulkHorseDetailsErr, setBulkHorseDetailsErr] = useState<string | null>(null);
+  const [watchHorseDetailsScraper, setWatchHorseDetailsScraper] = useState(false);
+  const horseDetailsSawRunningRef = useRef(false);
+  const [openSectionView, setOpenSectionView] = useState(true);
+  const [openSectionSync, setOpenSectionSync] = useState(true);
+  const [openSectionTools, setOpenSectionTools] = useState(true);
 
   const meeting = meetings[meetingIdx] ?? null;
   const meetingDate = meeting?.date ? String(meeting.date).slice(0, 10) : "";
@@ -347,6 +439,42 @@ export default function Realtime() {
     loadRaceSnapshotCounts();
   }, [loadRaceSnapshotCounts]);
 
+  useEffect(() => {
+    if (!meetingDate || !venueCode || !raceNo) {
+      setRaceRunners([]);
+      setRaceRunnersErr(null);
+      return;
+    }
+    setRaceRunnersLoading(true);
+    setRaceRunnersErr(null);
+    const qs = new URLSearchParams({
+      meeting_date: meetingDate,
+      venue_code: venueCode,
+      race_no: String(raceNo),
+    });
+    apiFetch<RaceRunnersResponse>(`/api/realtime/race-runners?${qs}`)
+      .then((r) => {
+        setRaceRunners(r.runners ?? []);
+      })
+      .catch((e: Error) => {
+        setRaceRunners([]);
+        setRaceRunnersErr(e.message);
+      })
+      .finally(() => setRaceRunnersLoading(false));
+  }, [meetingDate, venueCode, raceNo]);
+
+  const openCompareWithField = useCallback(() => {
+    const seen = new Set<string>();
+    const horses: { code: string; name: string }[] = [];
+    for (const row of raceRunners) {
+      if (horses.length >= MAX_COMPARE_HORSES) break;
+      if (seen.has(row.horse_code)) continue;
+      seen.add(row.horse_code);
+      horses.push({ code: row.horse_code, name: row.horse_name });
+    }
+    navigate("/compare", { state: { comparePreset: { horses } } });
+  }, [navigate, raceRunners]);
+
   const loadHistory = useCallback(
     (opts?: {
       silent?: boolean;
@@ -361,11 +489,13 @@ export default function Realtime() {
       const silent = opts?.silent === true;
       if (!silent) setLoading(true);
       setHistErr(null);
+      const since = new Date(Date.now() - timelineHours * 60 * 60 * 1000).toISOString();
       const qs = new URLSearchParams({
         meeting_date: md,
         venue_code: vc,
         race_no: String(rn),
-        limit: "300",
+        since,
+        limit: String(HISTORY_LIMIT_WITH_SINCE),
       });
       return apiFetch<HistoryResponse>(`/api/realtime/history?${qs}`)
         .then((r) => setHistory(r.snapshots ?? []))
@@ -377,7 +507,7 @@ export default function Realtime() {
           if (!silent) setLoading(false);
         });
     },
-    [meetingDate, venueCode, raceNo]
+    [meetingDate, venueCode, raceNo, timelineHours]
   );
 
   useEffect(() => {
@@ -392,6 +522,10 @@ export default function Realtime() {
   useEffect(() => {
     localStorage.setItem(LS_REFRESH_KEY, String(refreshMs));
   }, [refreshMs]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_TIMELINE_HOURS_KEY, String(timelineHours));
+  }, [timelineHours]);
 
   useEffect(() => {
     const races = meeting?.races ?? [];
@@ -613,6 +747,75 @@ export default function Realtime() {
     });
   }, []);
 
+  const runBulkHorseDetails = useCallback(async () => {
+    setBulkHorseDetailsErr(null);
+    setBulkHorseDetailsMsg(null);
+    if (!meetingDate || !venueCode || raceNumbers.length === 0) {
+      setBulkHorseDetailsErr("Select a meeting with races first.");
+      return;
+    }
+    setBulkHorseDetailsLoading(true);
+    try {
+      const { codes, raceErrors } = await fetchRunnersForMeetingRaces(meetingDate, venueCode, raceNumbers);
+      if (codes.length === 0) {
+        if (raceErrors.length) {
+          const sample = raceErrors.slice(0, 3).map((e) => `R${e.race_no}`).join(", ");
+          setBulkHorseDetailsErr(
+            `No horse codes collected (${raceErrors.length} race(s) failed${sample ? `: ${sample}` : ""}).`
+          );
+        } else {
+          setBulkHorseDetailsErr("No horse codes found (racecards may not be published yet).");
+        }
+        return;
+      }
+      await apiFetch<{ ok: boolean; message?: string }>("/api/scraper/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "horse-details",
+          horseCodes: codes,
+          horseDetailsSkipScraped: false,
+        }),
+      });
+      horseDetailsSawRunningRef.current = false;
+      const partial =
+        raceErrors.length > 0
+          ? `${raceErrors.length} race(s) had no racecard (skipped). `
+          : "";
+      setBulkHorseDetailsMsg(
+        `${partial}Started horse-details for ${codes.length} distinct horse code(s) (skip-scraped off — re-scrapes all listed codes).`
+      );
+      setWatchHorseDetailsScraper(true);
+    } catch (e) {
+      setBulkHorseDetailsErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBulkHorseDetailsLoading(false);
+    }
+  }, [meetingDate, venueCode, raceNumbers]);
+
+  useEffect(() => {
+    if (!watchHorseDetailsScraper) {
+      horseDetailsSawRunningRef.current = false;
+      return;
+    }
+    const poll = () => {
+      apiFetch<ScraperStatusResponse>("/api/scraper/status")
+        .then((s) => {
+          const running = s["horse-details"]?.running;
+          if (running) horseDetailsSawRunningRef.current = true;
+          if (horseDetailsSawRunningRef.current && !running) {
+            setWatchHorseDetailsScraper(false);
+            horseDetailsSawRunningRef.current = false;
+            setBulkHorseDetailsMsg((prev) => (prev ? `${prev} Job finished.` : "Horse-details job finished."));
+          }
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = window.setInterval(poll, 2000);
+    return () => window.clearInterval(id);
+  }, [watchHorseDetailsScraper]);
+
   const armedList = status ? armedIntervalList(status) : [];
 
   return (
@@ -620,13 +823,6 @@ export default function Realtime() {
       <h2 className="card-title" style={{ marginTop: 0 }}>
         Realtime odds
       </h2>
-      <p className="muted" style={{ marginBottom: 12 }}>
-        Snapshots from HKJC GraphQL (worker poll + hash dedup). If pool odds are empty, we use runner win odds from the
-        racecard. Use <strong>Auto-sync races</strong> to choose one or more races for server polling, then{" "}
-        <strong>Start interval (selected races)</strong>; or <strong>Sync all races (once)</strong> for a full sweep. For
-        QIN/QPL matrix + timeline, set <code>ODDS_SYNC_ODDS_TYPES</code> to include <code>QIN</code> and <code>QPL</code>{" "}
-        (see <code>.env.example</code>).
-      </p>
       {status && (
         <>
           <p className="muted realtime-worker-line" style={{ marginBottom: 12, fontSize: 13 }}>
@@ -705,126 +901,231 @@ export default function Realtime() {
       )}
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="controls realtime-toolbar" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-          <div>
-            <label className="field-label">Meeting</label>
-            <select
-              value={meetingIdx}
-              onChange={(e) => setMeetingIdx(Number(e.target.value))}
-              disabled={!meetings.length}
-            >
-              {meetings.map((m, i) => (
-                <option key={`${m.date}-${m.venueCode}-${i}`} value={i}>
-                  {String(m.date).slice(0, 10)} · {m.venueCode}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Race</label>
-            <select value={raceNo} onChange={(e) => setRaceNo(Number(e.target.value))} disabled={!raceNumbers.length}>
-              {raceNumbers.map((n) => {
-                const cnt = raceSnapshotCounts[n] ?? 0;
-                return (
-                  <option key={n} value={n}>
-                    Race {n}
-                    {cnt > 0 ? ` (${cnt} snapshots)` : ""}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          {!status?.legacyFullInterval && status?.oddsSyncEnabled !== false && raceNumbers.length > 0 && (
-            <div className="realtime-interval-races">
-              <span className="field-label">Auto-sync races</span>
-              <div className="realtime-interval-races-checks" role="group" aria-label="Races to include in server auto-sync">
-                {raceNumbers.map((n) => (
-                  <label key={n} className="realtime-interval-race-check">
-                    <input
-                      type="checkbox"
-                      checked={intervalSyncRaceNos.includes(n)}
-                      onChange={() => toggleIntervalRaceNo(n)}
-                    />
-                    <span>Race {n}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-          <div>
-            <label className="field-label">Chart pool</label>
-            <select value={chartPool} onChange={(e) => setChartPool(e.target.value as PoolOption)}>
-              {POOL_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Table pool</label>
-            <select value={tablePool} onChange={(e) => setTablePool(e.target.value as PoolOption)}>
-              {POOL_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Page refresh</label>
-            <select value={refreshMs} onChange={(e) => setRefreshMs(Number(e.target.value))}>
-              {REFRESH_CHOICES_MS.map((ms) => (
-                <option key={ms} value={ms}>
-                  {ms / 1000}s
-                </option>
-              ))}
-            </select>
-          </div>
-          <button type="button" className="btn-secondary" onClick={() => loadHistory()} disabled={loading}>
-            Refresh now
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => runServerSync()}
-            disabled={syncLoading || status?.oddsSyncEnabled === false}
-            title="Fetch odds for every active meeting and race once (full sweep)"
-          >
-            {syncLoading ? "Syncing…" : "Sync all races (once)"}
-          </button>
-          {!status?.legacyFullInterval && (
-            <>
+        <div className="realtime-controls-stack">
+          <section className="realtime-section" aria-labelledby="realtime-heading-view">
+            <h3 id="realtime-heading-view" className="realtime-section-title">
               <button
                 type="button"
-                className="btn-secondary"
-                onClick={() => startIntervalForSelectedRace()}
-                disabled={
-                  intervalSyncLoading ||
-                  status?.oddsSyncEnabled === false ||
-                  !meetingDate ||
-                  !venueCode ||
-                  intervalSyncRaceNos.length === 0
-                }
-                title="Poll HKJC on the server interval for each selected race, every worker tick"
+                className="realtime-section-toggle"
+                aria-expanded={openSectionView}
+                aria-controls="realtime-panel-view"
+                onClick={() => setOpenSectionView((v) => !v)}
               >
-                {intervalSyncLoading ? "…" : "Start interval (selected races)"}
+                <span className="realtime-section-toggle-text">View & charts</span>
+                <span className="realtime-section-chevron" aria-hidden>
+                  {openSectionView ? "▼" : "▶"}
+                </span>
               </button>
-            </>
-          )}
+            </h3>
+            <div id="realtime-panel-view" className="realtime-section-panel" hidden={!openSectionView}>
+              <p className="realtime-section-hint muted">
+                Pick meeting, race, and pools; timeline and page refresh control what you see below.
+              </p>
+              <div className="realtime-section-body realtime-section-view-controls controls">
+                <div>
+                  <label className="field-label">Meeting</label>
+                  <select
+                    value={meetingIdx}
+                    onChange={(e) => setMeetingIdx(Number(e.target.value))}
+                    disabled={!meetings.length}
+                  >
+                    {meetings.map((m, i) => (
+                      <option key={`${m.date}-${m.venueCode}-${i}`} value={i}>
+                        {String(m.date).slice(0, 10)} · {m.venueCode}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Race</label>
+                  <select value={raceNo} onChange={(e) => setRaceNo(Number(e.target.value))} disabled={!raceNumbers.length}>
+                    {raceNumbers.map((n) => {
+                      const cnt = raceSnapshotCounts[n] ?? 0;
+                      return (
+                        <option key={n} value={n}>
+                          Race {n}
+                          {cnt > 0 ? ` (${cnt} snapshots)` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Chart pool</label>
+                  <select value={chartPool} onChange={(e) => setChartPool(e.target.value as PoolOption)}>
+                    {POOL_OPTIONS.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Table pool</label>
+                  <select value={tablePool} onChange={(e) => setTablePool(e.target.value as PoolOption)}>
+                    {POOL_OPTIONS.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Timeline</label>
+                  <select value={timelineHours} onChange={(e) => setTimelineHours(Number(e.target.value))}>
+                    {TIMELINE_HOURS_CHOICES.map((h) => (
+                      <option key={h} value={h}>
+                        Last {h}h
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Page refresh</label>
+                  <select value={refreshMs} onChange={(e) => setRefreshMs(Number(e.target.value))}>
+                    {REFRESH_CHOICES_MS.map((ms) => (
+                      <option key={ms} value={ms}>
+                        {ms / 1000}s
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button type="button" className="btn btn-primary" onClick={() => loadHistory()} disabled={loading}>
+                  Refresh now
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="realtime-section" aria-labelledby="realtime-heading-sync">
+            <h3 id="realtime-heading-sync" className="realtime-section-title">
+              <button
+                type="button"
+                className="realtime-section-toggle"
+                aria-expanded={openSectionSync}
+                aria-controls="realtime-panel-sync"
+                onClick={() => setOpenSectionSync((v) => !v)}
+              >
+                <span className="realtime-section-toggle-text">Server sync</span>
+                <span className="realtime-section-chevron" aria-hidden>
+                  {openSectionSync ? "▼" : "▶"}
+                </span>
+              </button>
+            </h3>
+            <div id="realtime-panel-sync" className="realtime-section-panel" hidden={!openSectionSync}>
+              <p className="realtime-section-hint muted">
+                Tick races to include in server polling, then start interval; or run a one-off sync for all active races.
+              </p>
+              <div className="realtime-section-body realtime-section-sync">
+                {!status?.legacyFullInterval && status?.oddsSyncEnabled !== false && raceNumbers.length > 0 && (
+                  <div className="realtime-interval-races">
+                    <span className="field-label">Auto-sync races</span>
+                    <div className="realtime-interval-races-checks" role="group" aria-label="Races to include in server auto-sync">
+                      {raceNumbers.map((n) => (
+                        <label key={n} className="realtime-interval-race-check">
+                          <input
+                            type="checkbox"
+                            checked={intervalSyncRaceNos.includes(n)}
+                            onChange={() => toggleIntervalRaceNo(n)}
+                          />
+                          <span>Race {n}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="realtime-section-sync-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => runServerSync()}
+                    disabled={syncLoading || status?.oddsSyncEnabled === false}
+                    title="Fetch odds for every active meeting and race once (full sweep)"
+                  >
+                    {syncLoading ? "Syncing…" : "Sync all races (once)"}
+                  </button>
+                  {!status?.legacyFullInterval && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => startIntervalForSelectedRace()}
+                      disabled={
+                        intervalSyncLoading ||
+                        status?.oddsSyncEnabled === false ||
+                        !meetingDate ||
+                        !venueCode ||
+                        intervalSyncRaceNos.length === 0
+                      }
+                      title="Poll HKJC on the server interval for each selected race, every worker tick"
+                    >
+                      {intervalSyncLoading ? "…" : "Start interval (selected races)"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="realtime-section" aria-labelledby="realtime-heading-tools">
+            <h3 id="realtime-heading-tools" className="realtime-section-title">
+              <button
+                type="button"
+                className="realtime-section-toggle"
+                aria-expanded={openSectionTools}
+                aria-controls="realtime-panel-tools"
+                onClick={() => setOpenSectionTools((v) => !v)}
+              >
+                <span className="realtime-section-toggle-text">Data & tools</span>
+                <span className="realtime-section-chevron" aria-hidden>
+                  {openSectionTools ? "▼" : "▶"}
+                </span>
+              </button>
+            </h3>
+            <div id="realtime-panel-tools" className="realtime-section-panel" hidden={!openSectionTools}>
+              <p className="realtime-section-hint muted">
+                Match worker interval to how often the server should poll HKJC; bulk horse fetch re-scrapes every code in
+                this meeting (heavy).
+              </p>
+              <div className="realtime-section-body realtime-section-tools">
+                {settings?.oddsSyncEnabled !== false && (
+                  <div className="realtime-section-tools-worker">
+                    <button type="button" className="btn-secondary" onClick={applyServerInterval}>
+                      Apply page refresh interval to server worker
+                    </button>
+                    {settings && (
+                      <span className="muted realtime-section-tools-meta">
+                        Server worker: {settings.workerIntervalMs} ms
+                      </span>
+                    )}
+                    {settingsMsg && <span className="realtime-section-tools-msg">{settingsMsg}</span>}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => runBulkHorseDetails()}
+                  disabled={bulkHorseDetailsLoading || !meetingDate || !venueCode || raceNumbers.length === 0}
+                  title="Load racecards for every race in this meeting, then run horse-details on all distinct codes with skip-scraped disabled (full re-upsert for this list)"
+                >
+                  {bulkHorseDetailsLoading ? "Collecting…" : "Fetch horse history (all races)"}
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
 
-        {settings?.oddsSyncEnabled !== false && (
-          <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <button type="button" className="btn-secondary" onClick={applyServerInterval}>
-              Apply page refresh interval to server worker
-            </button>
-            {settings && (
-              <span className="muted" style={{ fontSize: 13 }}>
-                Server worker: {settings.workerIntervalMs} ms
-              </span>
+        {(bulkHorseDetailsErr || bulkHorseDetailsMsg) && (
+          <div style={{ marginTop: 10, fontSize: 13 }}>
+            {bulkHorseDetailsErr && <p className="error-text" style={{ margin: 0 }}>{bulkHorseDetailsErr}</p>}
+            {bulkHorseDetailsMsg && (
+              <p className="muted" style={{ margin: bulkHorseDetailsErr ? "8px 0 0" : 0 }}>
+                {bulkHorseDetailsMsg}{" "}
+                <Link to="/scraper">Scraper page</Link> for live logs.
+                {watchHorseDetailsScraper && (
+                  <span style={{ color: "#a5b4fc" }}> Running horse-details…</span>
+                )}
+              </p>
             )}
-            {settingsMsg && <span style={{ fontSize: 13, color: "#fbbf24" }}>{settingsMsg}</span>}
           </div>
         )}
 
@@ -835,6 +1136,76 @@ export default function Realtime() {
           Snapshots for <strong>{meetingDate || "—"}</strong> · <strong>{venueCode || "—"}</strong> · race{" "}
           <strong>{raceNo}</strong>: <strong>{history.length}</strong>
         </p>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+          <h3 className="card-title" style={{ margin: 0 }}>
+            Race field (HKJC racecard)
+          </h3>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={openCompareWithField}
+            disabled={raceRunners.length === 0 || raceRunnersLoading}
+            title={
+              raceRunners.length === 0
+                ? "Load runners first (racecard may not be available yet)"
+                : `Open Compare with up to ${MAX_COMPARE_HORSES} horses from this race`
+            }
+          >
+            Open in Compare
+          </button>
+        </div>
+        <p className="muted" style={{ margin: "8px 0 0 0", fontSize: 13, maxWidth: 720 }}>
+          <strong>Fetch horse history (all races)</strong> (under <strong>Data & tools</strong>) collects horse codes from
+          every race in this meeting and starts the horse-details job with <strong>skip-scraped off</strong> (re-upserts
+          every code) so profiles and history stay current for Analysis and AI tools.
+        </p>
+        {raceRunnersLoading && <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>Loading runners…</p>}
+        {raceRunnersErr && (
+          <p className="error-text" style={{ margin: "8px 0 0", fontSize: 13 }}>
+            {raceRunnersErr}
+          </p>
+        )}
+        {!raceRunnersLoading && !raceRunnersErr && raceRunners.length === 0 && meetingDate && venueCode && (
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+            No runners with horse codes for this race yet (check meeting date/venue or try again after the racecard is published).
+          </p>
+        )}
+        {raceRunners.length > 0 && (
+          <div
+            style={{
+              marginTop: 10,
+              maxHeight: 160,
+              overflowY: "auto",
+              border: "1px solid #334155",
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+          >
+            <table className="data-table" style={{ margin: 0 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 48 }}>#</th>
+                  <th>Horse</th>
+                  <th style={{ width: 96 }} title="HKJC horse code, e.g. L360">
+                    Horse code
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {raceRunners.map((r) => (
+                  <tr key={`${r.no}-${r.horse_code}`}>
+                    <td>{r.no}</td>
+                    <td>{r.horse_name}</td>
+                    <td style={{ fontFamily: "ui-monospace, monospace" }}>{formatHorseCodeDisplay(r.horse_code)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {isPairPool ? (
@@ -944,6 +1315,14 @@ export default function Realtime() {
           </div>
         </div>
       )}
+
+      <p className="muted realtime-page-intro" style={{ marginTop: 28, marginBottom: 0, fontSize: 13, lineHeight: 1.55 }}>
+        Snapshots from HKJC GraphQL (worker poll + hash dedup). If pool odds are empty, we use runner win odds from the
+        racecard. Use <strong>Auto-sync races</strong> to choose one or more races for server polling, then{" "}
+        <strong>Start interval (selected races)</strong>; or <strong>Sync all races (once)</strong> for a full sweep. For
+        QIN/QPL matrix + timeline, set <code>ODDS_SYNC_ODDS_TYPES</code> to include <code>QIN</code> and <code>QPL</code>{" "}
+        (see <code>.env.example</code>).
+      </p>
     </div>
   );
 }

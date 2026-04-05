@@ -25,7 +25,8 @@ const MERGED_RACE_FLAT = `
     COALESCE(m.rr_declared_weight, m.hist_declared_weight) AS declared_weight,
     COALESCE(m.rr_margin, m.hist_lbw) AS margin,
     COALESCE(m.rr_running_positions, m.hist_running_positions) AS running_positions,
-    m.hist_distance AS race_distance
+    m.hist_distance AS race_distance,
+    m.hist_finish_time AS hist_finish_time
   FROM hkjc_merged_race_data m
 `;
 
@@ -46,22 +47,40 @@ function parsePositionInt(raw) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** HKJC finish time text, e.g. "1:09.45" (min:sec) or plain seconds. */
+/**
+ * HKJC finish time: "1:09.45" (min:sec.decimals), "1:42:03" (min:sec:hundredths),
+ * or plain seconds. Do not join segments with parseFloat — "01:65" would parse as 1.
+ */
 function parseFinishTimeSeconds(raw) {
   if (raw == null) return null;
   const s = String(raw).trim();
   if (!s) return null;
   if (s.includes(":")) {
-    const parts = s.split(":");
+    const parts = s.split(":").map((p) => p.trim());
     if (parts.length < 2) return null;
     const mins = parseInt(parts[0], 10);
-    const sec = parseFloat(parts.slice(1).join(":"));
-    if (!Number.isFinite(mins) || !Number.isFinite(sec)) return null;
-    const t = mins * 60 + sec;
+    if (!Number.isFinite(mins)) return null;
+    if (parts.length === 2) {
+      const sec = parseFloat(parts[1]);
+      if (!Number.isFinite(sec)) return null;
+      const t = mins * 60 + sec;
+      return t > 0 ? t : null;
+    }
+    const secInt = parseInt(parts[1], 10);
+    const hundredths = parseInt(parts[2], 10);
+    if (!Number.isFinite(secInt) || !Number.isFinite(hundredths)) return null;
+    const t = mins * 60 + secInt + hundredths / 100;
     return t > 0 ? t : null;
   }
   const t = parseFloat(s);
   return Number.isFinite(t) && t > 0 ? t : null;
+}
+
+/** m/s; drop obvious garbage if parser or upstream data slips through. */
+function plausibleSpeedMps(speed) {
+  if (speed == null || !Number.isFinite(speed)) return null;
+  if (speed < 4 || speed > 35) return null;
+  return speed;
 }
 
 // ---- Horse list (dropdown; must be before /horses/:horseCode/history) -------
@@ -208,14 +227,15 @@ router.get("/horses/compare", async (req, res) => {
     .split(",")
     .map((c) => c.trim().toUpperCase())
     .filter(Boolean);
-  if (codes.length === 0 || codes.length > 6) {
-    return res.status(400).json({ error: "Provide 1–6 comma-separated horse codes" });
+  if (codes.length === 0 || codes.length > 14) {
+    return res.status(400).json({ error: "Provide 1–14 comma-separated horse codes" });
   }
 
   const { rows } = await pool.query(
     `SELECT race_date, racecourse, race_no, horse_name, horse_code, jockey,
             trainer, finish_position, finish_time, win_odds, draw,
-            actual_weight, declared_weight, margin, running_positions, race_distance
+            actual_weight, declared_weight, margin, running_positions, race_distance,
+            hist_finish_time
      FROM (${MERGED_RACE_FLAT}) AS mr
      WHERE horse_code = ANY($1::text[])
      ORDER BY horse_code, race_date, race_no NULLS LAST`,
@@ -226,15 +246,22 @@ router.get("/horses/compare", async (req, res) => {
   for (const r of rows) {
     const posInt = parsePositionInt(r.finish_position);
     const dist = r.race_distance != null ? Number(r.race_distance) : null;
-    const timeSeconds = parseFinishTimeSeconds(r.finish_time);
-    const speedMps =
-      dist != null && dist > 0 && timeSeconds != null && timeSeconds > 0
+    const histTimeRaw = r.hist_finish_time;
+    const hasHistSpeed =
+      histTimeRaw != null &&
+      String(histTimeRaw).trim() !== "" &&
+      dist != null &&
+      dist > 0;
+    const timeSeconds = hasHistSpeed ? parseFinishTimeSeconds(histTimeRaw) : null;
+    const rawSpeed =
+      hasHistSpeed && timeSeconds != null && timeSeconds > 0
         ? Math.round((dist / timeSeconds) * 10000) / 10000
         : null;
+    const speedMps = plausibleSpeedMps(rawSpeed);
     const enriched = {
       ...r,
       race_distance: dist,
-      time_seconds: timeSeconds,
+      time_seconds: speedMps != null ? timeSeconds : null,
       speed_mps: speedMps,
       position_int: posInt,
       race_score: deriveRaceScore(posInt, r.win_odds ? Number(r.win_odds) : null),
@@ -317,4 +344,5 @@ router.get("/meta/overview", async (_, res) => {
   res.json(rows[0] ?? {});
 });
 
+export { MERGED_RACE_FLAT, deriveRaceScore, parsePositionInt };
 export default router;
