@@ -46,8 +46,6 @@ services:
       ODDS_SYNC_ENABLED: ${ODDS_SYNC_ENABLED:-true}
       ODDS_SYNC_INTERVAL_MS: ${ODDS_SYNC_INTERVAL_MS:-10000}
       ODDS_SYNC_ODDS_TYPES: ${ODDS_SYNC_ODDS_TYPES:-WIN,PLA}
-    ports:
-      - "4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,13 +63,26 @@ services:
     env_file:
       - .env
     environment:
-      # Browser on your machine calls the mapped backend port (not the container hostname).
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
-    ports:
-      - "5173:5173"
+      # Same-origin /api via Caddy on :80 (overrides .env VITE_API_URL for this stack).
+      VITE_API_URL: ""
     depends_on:
       backend:
         condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: hkjc-caddy
+    ports:
+      - "80:80"
+      # Uncomment when you add a DNS name + TLS block in infra/docker/Caddyfile:
+      # - "443:443"
+    volumes:
+      - ./infra/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
 
   scraper:
     build:

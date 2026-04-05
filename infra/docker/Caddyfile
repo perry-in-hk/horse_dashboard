@@ -1,0 +1,12 @@
+# HTTP only on :80. Add a hostname block + :443 when you have DNS for TLS (Let's Encrypt).
+:80 {
+	handle /api* {
+		reverse_proxy backend:4000
+	}
+	handle /health {
+		reverse_proxy backend:4000
+	}
+	handle {
+		reverse_proxy frontend:5173
+	}
+}
