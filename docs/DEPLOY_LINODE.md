@@ -14,7 +14,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 |------|----------------|
 | 1 | Create Linode, firewall (**22** + **80**, and **443** if you plan HTTPS), install Docker on the server. |
 | 2 | `git clone` the repo — note the **actual folder name** (e.g. `horse_dashboard`), not necessarily `HKJC_Dashboard`. |
-| 3 | Copy `.env.example` → `.env`; set **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_DB`**, and **`DATABASE_URL`** with the **same** user/password; DB host **`postgres`**, not `localhost`. Add **`SESSION_SECRET`**, **`KEYCLOAK_CLIENT_SECRET`**, **`KEYCLOAK_PUBLIC_BASE_URL`**, and **`KEYCLOAK_INTERNAL_BASE_URL`** (see [§5 C5](#c5-dashboard-login-via-keycloak-oidc-app-users-not-postgres)). |
+| 3 | Copy `.env.example` → `.env`; set **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_DB`**, and **`DATABASE_URL`** with the **same** user/password; DB host **`postgres`**, not `localhost`. Add **`SESSION_SECRET`**, **`AUTH_INITIAL_USERNAME`**, **`AUTH_INITIAL_PASSWORD`**, and optionally **`SESSION_MAX_AGE_HOURS`** (see [§5 C5](#c5-dashboard-login-via-local-accounts-app-users-not-postgres)). |
 | 4 | `docker compose up -d --build`; open `http://<PUBLIC_IP>/`. The **Analysis** page reads **Postgres on the server** — it will be **empty** until you restore data. |
 | 5 | On your PC, create a dump **without PowerShell destroying UTF-8** (see [§7](#7-phase-e--copy-local-database-to-server-optional) — **recommended:** `pg_dump` to a file **inside** the container, then `docker cp` out). |
 | 6 | `scp` the `.sql` (or `.dump`) file to the server project directory. |
@@ -39,8 +39,8 @@ This section is the **short story** of a full deploy + data migration. Read the 
 
 ## 1. Architecture (short)
 
-- **Caddy** listens on **:80** (and **:443** when using HTTPS), proxies `/api*` and `/health` to **backend:4000**, `/auth*` to **keycloak:8080**, and everything else to **frontend:5173**. With a **`SITE_ADDRESS`** in `.env`, Caddy obtains **Let’s Encrypt** certificates and serves **HTTPS** automatically.
-- **Backend**, **Keycloak**, and **frontend** are **not** mapped to host ports **4000/8080/5173** in production `docker-compose.yml`; only **Caddy** is public on **80** / **443**. For local dev with host ports, use **`docker-compose.dev.yml`** ([`docs/POST_DEPLOY.md`](POST_DEPLOY.md) §5).
+- **Caddy** listens on **:80** (and **:443** when using HTTPS), proxies `/api*` and `/health` to **backend:4000**, and everything else to **frontend:5173**. With a **`SITE_ADDRESS`** in `.env`, Caddy obtains **Let’s Encrypt** certificates and serves **HTTPS** automatically.
+- **Backend** and **frontend** are **not** mapped to host ports **4000/5173** in production `docker-compose.yml`; only **Caddy** is public on **80** / **443**. For local dev with host ports, use **`docker-compose.dev.yml`**.
 - **Postgres** and **Redis** store data in **Docker volumes on the server** — a separate database from your **local** dev instance unless you **migrate** data (see [§7](#7-phase-e--copy-local-database-to-server-optional)).
 
 ---
@@ -76,7 +76,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
    - **TCP 443** — **required** if you use **HTTPS** with a domain ([§9](#9-https-with-a-hostname-optional)); optional for IP-only HTTP.
 4. **Attach** the firewall to the Linode.
 
-Do **not** open **5432** (Postgres), **6379** (Redis), **4000** (backend), or **8080** (Keycloak) to the world. Those services stay on the Docker network; only **Caddy** (**80** / **443**) is public.
+Do **not** open **5432** (Postgres), **6379** (Redis), or **4000** (backend) to the world. Those services stay on the Docker network; only **Caddy** (**80** / **443**) is public.
 
 ### A4. Install Docker (on the server)
 
@@ -172,12 +172,8 @@ You can also paste from your PC via `scp` or editor — see [§8](#8-challenges-
 | `DATABASE_URL` | Same **user** and **password** as above; host must be **`postgres`** (Docker service name), **not** `localhost`: `postgresql://USER:PASSWORD@postgres:5432/hkjc_dashboard` |
 | `REDIS_URL` | Usually `redis://redis:6379` |
 | `SESSION_SECRET` | Long random string; signs session cookies |
-| `KEYCLOAK_REALM` | Realm name, default `hkjc` |
-| `KEYCLOAK_CLIENT_ID` | OIDC client id, default `hkjc-dashboard` |
-| `KEYCLOAK_CLIENT_SECRET` | OIDC confidential client secret (required) |
-| `KEYCLOAK_PUBLIC_BASE_URL` | Browser-facing Keycloak URL, e.g. `https://yourname.duckdns.org/auth` |
-| `KEYCLOAK_INTERNAL_BASE_URL` | Backend-to-Keycloak URL inside Compose, usually `http://keycloak:8080/auth` |
-| `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | Keycloak admin console bootstrap account |
+| `AUTH_INITIAL_USERNAME` / `AUTH_INITIAL_PASSWORD` | Bootstrap first admin only when `dashboard_users` is empty |
+| `SESSION_MAX_AGE_HOURS` | Session cookie lifetime (hours), default `24` |
 | `SITE_ADDRESS` | Public hostname for Caddy (e.g. `yourname.duckdns.org`). Required for TLS in Compose; must match DNS **A** record to this server. |
 | `SESSION_COOKIE_SECURE` | Set **`true`** when users only use **HTTPS** so session cookies are `Secure` (recommended with TLS). |
 
@@ -194,26 +190,25 @@ Postgres initializes credentials **only on first** creation of its data director
 
 With Compose, the **frontend** service may set `VITE_API_URL` to `""` so the browser uses **same-origin** `/api/...` through Caddy. You do not need `http://localhost:4000` on the server for that pattern.
 
-### C5. Dashboard login via Keycloak OIDC (app users, not Postgres)
+### C5. Dashboard login via local accounts (app users, not Postgres)
 
-The **HKJC Dashboard** login (browser → `/api/auth/login`) is **separate** from **`POSTGRES_PASSWORD`**. Postgres credentials are for the database container; user identity is authenticated by **Keycloak** and mapped to `dashboard_users` by `keycloak_sub`.
+The **HKJC Dashboard** login (browser → `POST /api/auth/login`) is **separate** from **`POSTGRES_PASSWORD`**. Postgres credentials are only for the database connection; human users authenticate with app-local usernames/passwords stored in `dashboard_users`.
 
 | Topic | What to know |
 |--------|----------------|
-| **Admin/user provisioning** | Create operators in **Keycloak Admin Console** (`/auth/admin`) and assign realm roles (`admin`, `user`). |
-| **First login mapping** | On callback, backend stores `keycloak_sub` + `username` + `role` in `dashboard_users`; no app password is stored. |
-| **Role changes** | Change role in Keycloak, then have the user sign out and sign in again to refresh mapped role. |
-| **`AUTH_BROWSER_ORIGIN`** | For **Vite dev** (`:5173` proxying `/api` to `:4000`), set `http://localhost:5173` so OIDC `redirect_uri` matches the browser. Omit when using Docker+Caddy same-origin (relies on `X-Forwarded-*`). |
-| **Post-logout redirect URIs** | In client `hkjc-dashboard`, set **Valid post logout redirect URIs** (attribute `post.logout.redirect.uris`). Multiple URIs use **`##`** as separator, e.g. `https://yourname.duckdns.org/login##http://localhost:5173/login`. Value `+` only mirrors login callback URIs and will **not** allow `/login`. See `docs/KEYCLOAK_LOGIN_ISSUE_SUMMARY.md`. |
-| **`SESSION_SECRET`** | Required. Used to sign the **session cookie** (`connect-pg-simple` / Express session). Use a long random value per deployment (see `.env.example`). |
-| **`SESSION_COOKIE_SECURE`** | Set **`true`** when everyone uses **HTTPS** so the session cookie is sent only over TLS (see [§9](#9-https-with-a-hostname-optional)). |
+| **First admin bootstrap** | If `dashboard_users` is empty, backend creates the first `admin` from `AUTH_INITIAL_USERNAME` / `AUTH_INITIAL_PASSWORD` on startup. |
+| **Admin/user provisioning** | Admin can create `admin`/`user` accounts in the `Settings` page (`/api/users`). |
+| **Password policy** | Password min length is 8; hash uses bcrypt (cost 12). |
+| **Rate limit** | Login endpoint is rate-limited (15 minutes / IP / max 10 attempts). |
+| **Session** | `SESSION_SECRET` is required; `SESSION_COOKIE_SECURE=true` on HTTPS; optional `SESSION_MAX_AGE_HOURS`. |
+| **Audit log** | Login success/failure, logout, and admin create-user are written to `dashboard_audit_log`. |
 | **Transport** | Treat **HTTP (port 80) to a public IP** as **not** private for passwords: prefer **HTTPS** for anything beyond quick testing. |
 
-**Do not confuse:** **`DATABASE_URL`** / **`POSTGRES_*`** authenticate the **backend → Postgres** link. **Keycloak realm users + roles** define human operators of the web app.
+**Do not confuse:** **`DATABASE_URL`** / **`POSTGRES_*`** authenticate the **backend → Postgres** link. Dashboard users are managed in `dashboard_users`.
 
-### C6. After first deploy (Keycloak + verification)
+### C6. After first deploy (login + verification)
 
-Once `docker compose up` succeeds and **`https://<SITE_ADDRESS>/`** loads, complete **Keycloak client secret, users, and OIDC URIs** before relying on login. Step-by-step (example **`lord-in-hk.ccwu.cc`**): **[`docs/POST_DEPLOY.md`](POST_DEPLOY.md)**.
+Once `docker compose up` succeeds and **`https://<SITE_ADDRESS>/`** loads, verify bootstrap admin login and create required user accounts in `Settings`. Step-by-step: **[`docs/POST_DEPLOY.md`](POST_DEPLOY.md)**.
 
 ---
 
@@ -561,9 +556,9 @@ Let’s Encrypt must resolve your hostname to an address **before** it runs the 
 
 - Do **not** commit `.env` or share **secrets** (passwords, `SESSION_SECRET`, `OPENAI_API_KEY`, etc.) in public chats.
 - Restrict firewall **22** to your IP when possible.
-- Avoid exposing Postgres **5432** / Redis **6379** / backend **4000** / Keycloak **8080** to the public internet in production-oriented setups.
-- **Dashboard auth:** Credentials are managed by **Keycloak**, not by app-local passwords. Protect `KEYCLOAK_ADMIN_PASSWORD` and `KEYCLOAK_CLIENT_SECRET`.
-- **HTTPS:** Use strong Keycloak credentials and role assignment policy; TLS and **`allowedHosts`** do not replace authentication. With HTTPS-only access, set **`SESSION_COOKIE_SECURE=true`** (see [§9](#9-https-with-a-hostname-optional)).
+- Avoid exposing Postgres **5432** / Redis **6379** / backend **4000** to the public internet in production-oriented setups.
+- **Dashboard auth:** Use strong app-local passwords, keep `SESSION_SECRET` private, and monitor `dashboard_audit_log`.
+- **HTTPS:** TLS and **`allowedHosts`** do not replace authentication. With HTTPS-only access, set **`SESSION_COOKIE_SECURE=true`** (see [§9](#9-https-with-a-hostname-optional)).
 
 ---
 
@@ -575,7 +570,7 @@ Let’s Encrypt must resolve your hostname to an address **before** it runs the 
 # Server:
 git clone <repo-url>
 cd <repo-folder>    # e.g. horse_dashboard — use real clone name
-cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSION_SECRET; KEYCLOAK_* variables
+cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSION_SECRET; AUTH_INITIAL_* variables
 
 docker compose up -d --build
 curl -sS http://127.0.0.1/health

@@ -142,7 +142,27 @@ Listening: **`0.0.0.0:22`** and **`[::]:22`** — SSH is reachable on the public
 
 ---
 
-## 11. Chat thread summary (what happened in practice)
+## 11. Dashboard auth baseline controls
+
+The app now uses local username/password + session auth (no external IdP). For classified horse data, keep these controls enabled:
+
+- **Transport:** serve the dashboard only over HTTPS and keep `SESSION_COOKIE_SECURE=true` in production.
+- **Session:** keep `SESSION_SECRET` private, rotate it during incident response, and set `SESSION_MAX_AGE_HOURS` to a short value (default 24).
+- **Brute-force resistance:** keep login rate limiting enabled on `POST /api/auth/login`.
+- **Auditability:** monitor `dashboard_audit_log` for `login_failure` spikes or unusual `admin_create_user` activity.
+
+Quick SQL check:
+
+```sql
+SELECT created_at, event_type, success, username, ip
+FROM dashboard_audit_log
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+---
+
+## 12. Chat thread summary (what happened in practice)
 
 High-level story from the project conversation—useful for **future you** or anyone picking this up cold.
 
@@ -162,7 +182,7 @@ High-level story from the project conversation—useful for **future you** or an
 
 ---
 
-## 12. Optional: SSH client config (Windows)
+## 13. Optional: SSH client config (Windows)
 
 To avoid typing **`-i`** every time for a dedicated key:
 
@@ -185,6 +205,6 @@ ssh -i $env:USERPROFILE\.ssh\id_ed25519_linode deploy@139.162.51.138
 
 ---
 
-## 13. Disclaimer
+## 14. Disclaimer
 
 This is **operational hygiene** for a small VPS, not legal or compliance advice. Re-assess after major OS or Docker changes.

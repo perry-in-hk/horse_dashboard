@@ -3,11 +3,14 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
+import rateLimit from "express-rate-limit";
 import { pool } from "./db.js";
 import { runMigrations } from "./migrate.js";
 import { createSessionMiddleware } from "./sessionStore.js";
 import { requireAuth } from "./middleware/auth.js";
-import { login, callback, logout, me } from "./routes/authHandlers.js";
+import { bootstrapInitialAdmin } from "./bootstrapAdmin.js";
+import { login, logout, me } from "./routes/authHandlers.js";
+import usersRouter from "./routes/users.js";
 import analyticsRouter from "./routes/analytics.js";
 import dbRouter from "./routes/db.js";
 import scraperRouter from "./routes/scraper.js";
@@ -32,13 +35,20 @@ try {
 }
 app.use(sessionMiddleware);
 
-app.get("/api/auth/login", login);
-app.get("/api/auth/callback", callback);
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post("/api/auth/login", loginLimiter, login);
 
 const protectedApi = express.Router();
 protectedApi.use(requireAuth);
 protectedApi.get("/auth/me", me);
 protectedApi.post("/auth/logout", logout);
+protectedApi.use("/users", usersRouter);
 protectedApi.use("/analytics", analyticsRouter);
 protectedApi.use("/db", dbRouter);
 protectedApi.use("/scraper", scraperRouter);
@@ -57,6 +67,7 @@ const port = Number(process.env.PORT ?? 4000);
 (async () => {
   try {
     await runMigrations();
+    await bootstrapInitialAdmin();
   } catch (e) {
     console.error(e);
     process.exit(1);

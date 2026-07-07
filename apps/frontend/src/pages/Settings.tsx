@@ -1,5 +1,6 @@
 import SystemWorkflowDiagrams from "../components/SystemWorkflowDiagrams.tsx";
 import PageHeader from "../components/PageHeader.tsx";
+import UserAdminSection from "../components/UserAdminSection.tsx";
 
 export default function Settings() {
   return (
@@ -15,10 +16,9 @@ export default function Settings() {
 
       <section className="card settings-intro">
         <h2 className="card-title">帳號管理</h2>
-        <p className="muted">
-          帳號、密碼與角色由身分管理平台集中維護。若需新增或調整權限，請聯絡系統管理員於 Keycloak 後台處理。
-        </p>
+        <p className="muted">管理員可在本頁新增使用者、重設帳號並分配 admin 或 user 權限。</p>
       </section>
+      <UserAdminSection />
 
       <section className="card settings-infra">
         <h2 className="card-title">系統流程總覽</h2>
