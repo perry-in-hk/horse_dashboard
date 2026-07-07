@@ -27,6 +27,7 @@
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
+        "https://lord-in-hk.ccwu.cc/api/auth/callback",
         "https://localhost/api/auth/callback",
         "https://*/api/auth/callback",
         "http://localhost/api/auth/callback",
@@ -34,6 +35,7 @@
         "http://localhost:4000/api/auth/callback"
       ],
       "webOrigins": [
+        "https://lord-in-hk.ccwu.cc",
         "https://localhost",
         "http://localhost",
         "http://localhost:5173",
@@ -41,7 +43,7 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5173/login##http://localhost/login##http://localhost:4000/login##https://localhost/login##https://*/login"
+        "post.logout.redirect.uris": "https://lord-in-hk.ccwu.cc/login##http://localhost:5173/login##http://localhost/login##http://localhost:4000/login##https://localhost/login##https://*/login"
       },
       "defaultClientScopes": ["profile", "email", "roles"]
     }
