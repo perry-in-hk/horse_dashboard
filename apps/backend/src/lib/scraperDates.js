@@ -79,3 +79,45 @@ export function normalizeHistoricalIsoDates(dates) {
   }
   return out;
 }
+
+/**
+ * Expand inclusive ISO date range to a sorted unique list (max 366 days).
+ * @param {string} startIso YYYY-MM-DD
+ * @param {string} endIso YYYY-MM-DD
+ */
+export function expandIsoDateRange(startIso, endIso) {
+  const start = typeof startIso === "string" ? startIso.trim() : "";
+  const end = typeof endIso === "string" ? endIso.trim() : "";
+  if (!isValidIsoDate(start) || !isValidIsoDate(end)) {
+    throw new Error("startDate 與 endDate 須為有效 YYYY-MM-DD 格式");
+  }
+  if (start > end) {
+    throw new Error("startDate 不可晚於 endDate");
+  }
+  const out = [];
+  let { y, m, d } = parseYmd(start);
+  for (let i = 0; i < 366; i++) {
+    const ymd = ymdString(y, m, d);
+    out.push(ymd);
+    if (ymd === end) return out;
+    ({ y, m, d } = addCalendarDays(y, m, d, 1));
+  }
+  throw new Error("日期區間不可超過 366 日");
+}
+
+/**
+ * @param {unknown} startDate
+ * @param {unknown} endDate
+ * @param {unknown} dates legacy explicit list
+ */
+export function resolveHistoricalIsoDates(startDate, endDate, dates) {
+  const hasStart = typeof startDate === "string" && startDate.trim() !== "";
+  const hasEnd = typeof endDate === "string" && endDate.trim() !== "";
+  if (hasStart || hasEnd) {
+    if (!hasStart || !hasEnd) {
+      throw new Error("請同時提供 startDate 與 endDate");
+    }
+    return expandIsoDateRange(startDate, endDate);
+  }
+  return normalizeHistoricalIsoDates(dates);
+}

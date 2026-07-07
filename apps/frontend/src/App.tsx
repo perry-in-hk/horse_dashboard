@@ -1,4 +1,5 @@
-import { NavLink, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import Analysis from "./pages/Analysis.tsx";
 import Compare from "./pages/Compare.tsx";
 import Database from "./pages/Database.tsx";
@@ -8,19 +9,37 @@ import Realtime from "./pages/Realtime.tsx";
 import Settings from "./pages/Settings.tsx";
 import Login from "./pages/Login.tsx";
 import { useAuth } from "./auth/AuthContext.tsx";
+import AppSidebar from "./components/AppSidebar.tsx";
 
-const tabs = [
-  { to: "/analysis", label: "Analysis" },
-  { to: "/compare", label: "Compare" },
-  { to: "/database", label: "Database" },
-  { to: "/scraper", label: "Scraper" },
-  { to: "/realtime", label: "Realtime" },
-  { to: "/ai", label: "智能分析" },
-  { to: "/settings", label: "Settings" },
-] as const;
+const PAGE_TITLE: Record<string, string> = {
+  "/analysis": "Analysis",
+  "/compare": "Compare",
+  "/database": "Database",
+  "/scraper": "Scraper",
+  "/realtime": "Realtime",
+  "/ai": "智能分析",
+  "/settings": "Settings",
+};
 
 function AppLayout() {
   const { user, loading, logout } = useAuth();
+  const location = useLocation();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const pageTitle = useMemo(() => PAGE_TITLE[location.pathname] ?? "Dashboard", [location.pathname]);
+  const sidebarVisible =
+    typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches
+      ? mobileOpen
+      : !sidebarCollapsed;
+
+  function toggleSidebar() {
+    const isMobile = window.matchMedia("(max-width: 768px)").matches;
+    if (isMobile) {
+      setMobileOpen((open) => !open);
+      return;
+    }
+    setSidebarCollapsed((collapsed) => !collapsed);
+  }
 
   if (loading) {
     return (
@@ -38,29 +57,36 @@ function AppLayout() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <h1 className="topbar-title">HKJC Dashboard</h1>
-        <nav className="tab-nav">
-          {tabs.map((t) => (
-            <NavLink key={t.to} to={t.to} className={({ isActive }) => `tab-link${isActive ? " active" : ""}`}>
-              {t.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="topbar-user">
-          <span className="topbar-username" title={user.username}>
-            {user.username}
-            {user.role === "admin" ? <span className="topbar-role"> admin</span> : null}
-          </span>
-          <button type="button" className="topbar-logout" onClick={() => void logout()}>
-            Log out
+      <div className={`app-sidebar-overlay${mobileOpen ? " open" : ""}`} onClick={() => setMobileOpen(false)} />
+      <div
+        className={`app-sidebar-host${mobileOpen ? " mobile-open" : ""}${sidebarCollapsed ? " collapsed" : ""}`}
+      >
+        <AppSidebar
+          username={user.username}
+          isAdmin={user.role === "admin"}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+          onCloseMobile={() => setMobileOpen(false)}
+          onLogout={() => void logout()}
+        />
+      </div>
+      <div className={`app-main${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+        <header className="app-topline">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={toggleSidebar}
+            aria-label={sidebarVisible ? "收起側欄" : "展開側欄"}
+            aria-expanded={sidebarVisible}
+          >
+            {sidebarVisible ? "✕" : "☰"}
           </button>
-        </div>
-      </header>
-
-      <main className="page-content">
-        <Outlet />
-      </main>
+          <h1 className="app-topline-title">{pageTitle}</h1>
+        </header>
+        <main className="page-content">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

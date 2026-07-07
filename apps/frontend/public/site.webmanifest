@@ -1,0 +1,15 @@
+{
+  "name": "HKJC Dashboard",
+  "short_name": "HKJC",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "theme_color": "#354168",
+  "background_color": "#0a0a0a",
+  "display": "standalone"
+}

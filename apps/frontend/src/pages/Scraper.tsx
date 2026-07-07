@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api/client.ts";
-import MultiDateCalendar from "../components/MultiDateCalendar.tsx";
+import PageHeader from "../components/PageHeader.tsx";
 
 type ScriptKey = "historical" | "horse-details";
 
@@ -42,7 +42,8 @@ export default function Scraper() {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<ScriptKey | null>(null);
-  const [historicalDates, setHistoricalDates] = useState<string[]>([]);
+  const [historicalStartDate, setHistoricalStartDate] = useState("");
+  const [historicalEndDate, setHistoricalEndDate] = useState("");
   const [horseCodesRaw, setHorseCodesRaw] = useState("");
 
   const refresh = useCallback(() => {
@@ -66,16 +67,32 @@ export default function Scraper() {
 
   async function start(script: ScriptKey) {
     setError(null);
+    if (script === "historical") {
+      const hasStart = historicalStartDate.trim() !== "";
+      const hasEnd = historicalEndDate.trim() !== "";
+      if (hasStart !== hasEnd) {
+        setError("請同時選擇開始與結束日期，或兩者皆留空以使用預設賽馬日。");
+        return;
+      }
+      if (hasStart && hasEnd && historicalStartDate > historicalEndDate) {
+        setError("開始日期不可晚於結束日期。");
+        return;
+      }
+    }
     setBusy(script);
     try {
-      const dates = script === "historical" ? historicalDates : [];
       const horseCodes = script === "horse-details" ? parseHorseCodeList(horseCodesRaw) : [];
       await apiFetch<{ ok: boolean; message?: string }>("/api/scraper/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           script === "historical"
-            ? { script, ...(dates.length ? { dates } : {}) }
+            ? {
+                script,
+                ...(historicalStartDate && historicalEndDate
+                  ? { startDate: historicalStartDate, endDate: historicalEndDate }
+                  : {}),
+              }
             : script === "horse-details"
               ? { script, ...(horseCodes.length ? { horseCodes } : {}) }
               : { script }
@@ -90,38 +107,67 @@ export default function Scraper() {
   }
 
   return (
-    <div>
-      <h2 style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700 }}>Scraper jobs</h2>
-      <p style={{ margin: "0 0 20px", color: "#94a3b8", fontSize: 14, maxWidth: 720 }}>
-        Run the HKJC data collectors on the machine where the backend is running. Historical fills race
-        results and dividends; horse-details loads profiles and race history for chosen horse codes, or all
-        distinct codes from <code>hkjc_horse_race_history</code> when you leave the list empty. Logs below are
-        a recent tail only.
-      </p>
+    <div className="scraper-page">
+      <PageHeader title="Scraper jobs" subtitle="管理資料抓取任務與最近執行記錄。" />
+      <p className="muted scraper-intro">在此啟動歷史賽果與馬匹資料抓取，並即時查看任務狀態。</p>
+
+      <div className="card scraper-status-card">
+        <p className="scraper-status-line">
+          任務狀態：
+          {status?.historical?.running || status?.["horse-details"]?.running ? (
+            <span className="text-success"> 執行中</span>
+          ) : (
+            <span className="text-faint-inline"> 目前無執行中任務</span>
+          )}
+        </p>
+        <button type="button" className="btn btn-ghost" onClick={refresh}>
+          重新整理狀態
+        </button>
+      </div>
 
       {error && (
-        <div className="card" style={{ marginBottom: 16, border: "1px solid rgba(248, 113, 113, 0.35)" }}>
-          <div style={{ color: "#fca5a5", fontSize: 14 }}>{error}</div>
+        <div className="card border-danger-soft scraper-error-banner">
+          <div className="error-text">{error}</div>
         </div>
       )}
 
-      <div className="grid-2" style={{ marginBottom: 20 }}>
+      <div className="grid-2 scraper-jobs-grid">
         <div className="card">
           <h3 className="card-title">Historical results</h3>
-          <p style={{ margin: "0 0 16px", fontSize: 14, color: "#94a3b8" }}>
-            <code>npm run historical</code> — local meeting discovery, race results, dividends, events.
+          <p className="muted scraper-card-desc">
+            抓取歷史賽事結果與派彩資料。可指定日期區間，或留空使用系統預設賽馬日。
           </p>
-          <label style={{ display: "block", marginBottom: 8, fontSize: 13, color: "#94a3b8" }}>
-            Race dates (optional — click days in the calendar; multi-select)
-          </label>
-          <MultiDateCalendar
-            value={historicalDates}
-            onChange={setHistoricalDates}
-            disabled={busy !== null || status?.historical?.running != null}
-          />
-          <p style={{ margin: "12px 0 16px", fontSize: 12, color: "#64748b" }}>
-            Leave empty to scrape the latest Wednesday and Sunday before today (Hong Kong time). If data for a
-            chosen date already exists in the database, the run is rejected.
+          <div className="scraper-date-range">
+            <div className="scraper-date-field">
+              <label className="field-label" htmlFor="historical-start-date">
+                開始日期
+              </label>
+              <input
+                id="historical-start-date"
+                type="date"
+                className="scraper-input scraper-date-input"
+                value={historicalStartDate}
+                onChange={(e) => setHistoricalStartDate(e.target.value)}
+                disabled={busy !== null || status?.historical?.running != null}
+              />
+            </div>
+            <div className="scraper-date-field">
+              <label className="field-label" htmlFor="historical-end-date">
+                結束日期
+              </label>
+              <input
+                id="historical-end-date"
+                type="date"
+                className="scraper-input scraper-date-input"
+                value={historicalEndDate}
+                min={historicalStartDate || undefined}
+                onChange={(e) => setHistoricalEndDate(e.target.value)}
+                disabled={busy !== null || status?.historical?.running != null}
+              />
+            </div>
+          </div>
+          <p className="text-faint-inline scraper-hint">
+            區間內每一日都會嘗試抓取；無賽事的日期會自動略過。若資料已存在，任務會拒絕重複匯入。
           </p>
           <button
             type="button"
@@ -129,39 +175,27 @@ export default function Scraper() {
             disabled={busy !== null || status?.historical?.running != null}
             onClick={() => start("historical")}
           >
-            {status?.historical?.running ? "Running…" : "Run historical scraper"}
+            {status?.historical?.running ? "執行中…" : "執行歷史抓取"}
           </button>
+          {status && <LogPanel title="Historical 日誌" s={status.historical} />}
         </div>
 
         <div className="card">
           <h3 className="card-title">Horse details</h3>
-          <p style={{ margin: "0 0 16px", fontSize: 14, color: "#94a3b8" }}>
-            <code>npm run horse-details</code> — profiles and race history from HKJC horse pages.
+          <p className="muted scraper-card-desc">
+            抓取馬匹詳細資料與歷史紀錄。可輸入特定馬匹代碼，或留空由系統自動判斷。
           </p>
-          <label style={{ display: "block", marginBottom: 8, fontSize: 13, color: "#94a3b8" }}>
-            Horse codes (optional, comma or whitespace separated)
-          </label>
+          <label className="scraper-label">馬匹代碼（可選，逗號或空白分隔）</label>
           <input
             type="text"
-            style={{
-              width: "100%",
-              maxWidth: 420,
-              marginBottom: 8,
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid rgba(148, 163, 184, 0.35)",
-              background: "#0f172a",
-              color: "#e2e8f0",
-              fontSize: 14,
-            }}
-            placeholder="e.g. A123, B456"
+            className="scraper-input"
+            placeholder="例如 A123, B456"
             value={horseCodesRaw}
             onChange={(e) => setHorseCodesRaw(e.target.value)}
             disabled={busy !== null || status?.["horse-details"]?.running != null}
           />
-          <p style={{ margin: "0 0 16px", fontSize: 12, color: "#64748b" }}>
-            Leave empty to scrape every horse code found in merged race history. Your operator can switch to a file-backed
-            code list in server configuration if needed.
+          <p className="text-faint-inline scraper-hint">
+            留空時會抓取系統可識別的全部馬匹代碼。
           </p>
           <button
             type="button"
@@ -169,23 +203,11 @@ export default function Scraper() {
             disabled={busy !== null || status?.["horse-details"]?.running != null}
             onClick={() => start("horse-details")}
           >
-            {status?.["horse-details"]?.running ? "Running…" : "Run horse-details scraper"}
+            {status?.["horse-details"]?.running ? "執行中…" : "執行馬匹資料抓取"}
           </button>
+          {status && <LogPanel title="Horse-details 日誌" s={status["horse-details"]} />}
         </div>
       </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <button type="button" className="btn btn-ghost" onClick={refresh}>
-          Refresh status
-        </button>
-      </div>
-
-      {status && (
-        <div className="grid-2">
-          <LogPanel title="Historical (live / last)" s={status.historical} />
-          <LogPanel title="Horse-details (live / last)" s={status["horse-details"]} />
-        </div>
-      )}
     </div>
   );
 }
@@ -194,28 +216,16 @@ function LogPanel({ title, s }: { title: string; s: ScriptStatus }) {
   const lines =
     s.running?.logTail?.length ? s.running.logTail : s.lastRun?.logTail?.length ? s.lastRun.logTail : [];
   const meta = s.running
-    ? `PID ${s.running.pid} · started ${s.running.startedAt}`
+    ? `PID ${s.running.pid} · 開始於 ${s.running.startedAt}`
     : s.lastRun
-      ? `Exit ${s.lastRun.exitCode ?? "?"} · ended ${s.lastRun.endedAt}`
-      : "No runs yet this session";
+      ? `Exit ${s.lastRun.exitCode ?? "?"} · 結束於 ${s.lastRun.endedAt}`
+      : "本次工作階段尚未執行";
 
   return (
-    <div className="card">
+    <div className="scraper-log-panel">
       <h3 className="card-title">{title}</h3>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>{meta}</div>
-      <pre
-        style={{
-          margin: 0,
-          maxHeight: 280,
-          overflow: "auto",
-          fontSize: 11,
-          lineHeight: 1.45,
-          background: "#0f172a",
-          padding: 12,
-          borderRadius: 8,
-          color: "#cbd5e1",
-        }}
-      >
+      <div className="log-panel-meta">{meta}</div>
+      <pre className="log-panel-pre">
         {lines.length ? lines.join("\n") : "—"}
       </pre>
     </div>

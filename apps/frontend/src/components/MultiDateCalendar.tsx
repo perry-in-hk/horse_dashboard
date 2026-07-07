@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -36,7 +36,7 @@ export default function MultiDateCalendar({ value, onChange, disabled }: Props) 
   while (cells.length % 7 !== 0) cells.push(null);
   while (cells.length < 42) cells.push(null);
 
-  const monthLabel = new Date(y, m0, 1).toLocaleString("en-GB", { month: "long", year: "numeric" });
+  const monthLabel = new Date(y, m0, 1).toLocaleString("zh-HK", { month: "long", year: "numeric" });
 
   function toggleDay(d: number) {
     if (disabled) return;
@@ -57,61 +57,36 @@ export default function MultiDateCalendar({ value, onChange, disabled }: Props) 
     today.getFullYear() === y && today.getMonth() === m0 && today.getDate() === d;
 
   return (
-    <div style={{ maxWidth: 320 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 10,
-        }}
-      >
+    <div className="multi-date-calendar">
+      <div className="calendar-head">
         <button
           type="button"
-          className="btn btn-ghost"
-          style={{ padding: "4px 10px", minWidth: 36 }}
+          className="btn btn-ghost calendar-nav-btn"
           disabled={disabled}
           onClick={() => goMonth(-1)}
-          aria-label="Previous month"
+          aria-label="上個月"
         >
           ‹
         </button>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0" }}>{monthLabel}</span>
+        <span className="calendar-month">{monthLabel}</span>
         <button
           type="button"
-          className="btn btn-ghost"
-          style={{ padding: "4px 10px", minWidth: 36 }}
+          className="btn btn-ghost calendar-nav-btn"
           disabled={disabled}
           onClick={() => goMonth(1)}
-          aria-label="Next month"
+          aria-label="下個月"
         >
           ›
         </button>
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: 4,
-          textAlign: "center",
-          fontSize: 11,
-          color: "#64748b",
-          marginBottom: 6,
-        }}
-      >
+      <div className="calendar-weekdays">
         {WEEKDAYS.map((w) => (
-          <div key={w} style={{ padding: "2px 0" }}>
+          <div key={w} className="calendar-weekday-cell">
             {w}
           </div>
         ))}
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: 4,
-        }}
-      >
+      <div className="calendar-grid">
         {cells.map((d, i) => {
           if (d === null) {
             return <div key={`e-${i}`} />;
@@ -125,36 +100,25 @@ export default function MultiDateCalendar({ value, onChange, disabled }: Props) 
               type="button"
               disabled={disabled}
               onClick={() => toggleDay(d)}
-              style={{
-                aspectRatio: "1",
-                minHeight: 36,
-                borderRadius: 8,
-                border: todayRing ? "1px solid rgba(96, 165, 250, 0.6)" : "1px solid transparent",
-                background: on ? "rgba(59, 130, 246, 0.35)" : "rgba(15, 23, 42, 0.8)",
-                color: "#e2e8f0",
-                fontSize: 13,
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled ? 0.5 : 1,
-              }}
+              className={`calendar-day${on ? " selected" : ""}${todayRing ? " today" : ""}${disabled ? " disabled" : ""}`}
             >
               {d}
             </button>
           );
         })}
       </div>
-      <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="calendar-footer">
         <button
           type="button"
-          className="btn btn-ghost"
-          style={{ fontSize: 12 }}
+          className="btn btn-ghost calendar-clear-btn"
           disabled={disabled || value.length === 0}
           onClick={() => onChange([])}
         >
-          Clear dates
+          清除日期
         </button>
         {value.length > 0 && (
-          <span style={{ fontSize: 12, color: "#94a3b8" }}>
-            {value.length} date{value.length === 1 ? "" : "s"} selected
+          <span className="muted calendar-summary">
+            已選擇 {value.length} 日
           </span>
         )}
       </div>

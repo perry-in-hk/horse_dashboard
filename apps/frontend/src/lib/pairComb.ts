@@ -49,12 +49,12 @@ export function pairCellTrend(args: {
 export function pairTrendStyle(trend: PairCellTrend): CSSProperties {
   switch (trend) {
     case "hot":
-      return { background: "rgba(248, 113, 113, 0.35)", borderColor: "#f87171" };
+      return { background: "var(--pair-hot-bg)", borderColor: "var(--pair-hot-border)" };
     case "drop20":
-      return { background: "rgba(74, 222, 128, 0.2)", borderColor: "#4ade80" };
+      return { background: "var(--pair-drop20-bg)", borderColor: "var(--pair-drop20-border)" };
     case "drop50":
-      return { background: "rgba(180, 83, 9, 0.35)", borderColor: "#d97706" };
+      return { background: "var(--pair-drop50-bg)", borderColor: "var(--pair-drop50-border)" };
     default:
-      return { background: "#334155", borderColor: "#475569" };
+      return { background: "var(--bg-muted)", borderColor: "var(--border-focus)" };
   }
 }

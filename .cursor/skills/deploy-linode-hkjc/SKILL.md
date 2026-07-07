@@ -10,7 +10,9 @@ description: >-
   DNS, SITE_ADDRESS, SESSION_COOKIE_SECURE, Let's Encrypt, Vite blocked host / allowedHosts,
   VITE_WS_URL, HKJC production deploy, git pull on the server, GitHub HTTPS PAT vs password,
   untracked files blocking merge (backup.sql / hkjc_restore.sql), docker compose rebuild after pull,
-  or UI still showing old version.
+  or UI still showing old version. Dashboard login: Keycloak OIDC, realm roles admin/user,
+  KEYCLOAK_CLIENT_SECRET, KEYCLOAK_PUBLIC_BASE_URL/KEYCLOAK_INTERNAL_BASE_URL, SESSION_SECRET,
+  difference from POSTGRES_PASSWORD.
 ---
 
 # HKJC Dashboard — Linode deploy (agent skill)
@@ -31,10 +33,11 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 2. **State facts:** Server DB is a **separate Docker volume** — the **Analysis** page reads **server Postgres**; it is **empty** until data is migrated or scraped on the server.
 3. **Use a checklist** from `docs/DEPLOY_LINODE.md` §0 or §11 when walking the user through the happy path.
 4. **Diagnose by symptom** using the cheat sheet in `docs/DEPLOY_LINODE.md` §8 before guessing.
-5. **HTTPS:** DNS **A** record → Linode IP; firewall **443**; server `.env` must include **`SITE_ADDRESS`** (hostname) and usually **`SESSION_COOKIE_SECURE=true`**; `docker compose up -d --build`. Details: **§9** in the doc.
-6. **Vite “Blocked request / host not allowed”** behind Caddy: **`server.allowedHosts: true`** in `apps/frontend/vite.config.ts`, rebuild frontend. **§9.4** in the doc.
-7. **Server code updates:** After `git push`, the server needs `git pull` **and** `docker compose up -d --build` (see `docs/DEPLOY_LINODE.md` §6 **D1**). If `git pull` aborts on **untracked files would be overwritten**, move or remove conflicting paths (often `backup.sql`, `hkjc_*.sql`), then pull again.
-8. **GitHub over HTTPS:** Password login for `git push`/`git pull` is disabled — use a **Personal Access Token** or **SSH** (see §6 D1 in the doc).
+5. **Dashboard auth (web login):** **`POSTGRES_PASSWORD`** is only for the **backend → Postgres** connection. Human dashboard users are managed in **Keycloak**; backend maps `keycloak_sub` and role into `dashboard_users`. Required envs: **`KEYCLOAK_CLIENT_SECRET`**, **`KEYCLOAK_PUBLIC_BASE_URL`**, **`KEYCLOAK_INTERNAL_BASE_URL`**, and **`SESSION_SECRET`**. Full table: **`docs/DEPLOY_LINODE.md` §5 C5**.
+6. **HTTPS:** DNS **A** record → Linode IP; firewall **443**; server `.env` must include **`SITE_ADDRESS`** (hostname) and usually **`SESSION_COOKIE_SECURE=true`**; `docker compose up -d --build`. Details: **§9** in the doc.
+7. **Vite “Blocked request / host not allowed”** behind Caddy: **`server.allowedHosts: true`** in `apps/frontend/vite.config.ts`, rebuild frontend. **§9.4** in the doc.
+8. **Server code updates:** After `git push`, the server needs `git pull` **and** `docker compose up -d --build` (see `docs/DEPLOY_LINODE.md` §6 **D1**). If `git pull` aborts on **untracked files would be overwritten**, move or remove conflicting paths (often `backup.sql`, `hkjc_*.sql`), then pull again.
+9. **GitHub over HTTPS:** Password login for `git push`/`git pull` is disabled — use a **Personal Access Token** or **SSH** (see §6 D1 in the doc).
 
 ---
 
@@ -43,6 +46,7 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 | Topic | Rule |
 |-------|------|
 | **`.env`** | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, and **`DATABASE_URL`** must use the **same** user and password. In Compose, DB host is **`postgres`**, not `localhost`. |
+| **Dashboard vs DB passwords** | **`POSTGRES_*`** / **`DATABASE_URL`** ≠ dashboard login. Web identity comes from **Keycloak** and roles (`admin`/`user`), while app keeps session cookies. See **`docs/DEPLOY_LINODE.md` §5 C5**. |
 | **Server Postgres user** | Never assume the role is `hkjc`. On the server run `docker exec <postgres-container> env \| grep POSTGRES` and use **`POSTGRES_USER`** in every `psql` / `pg_restore`. |
 | **Dump on Windows** | Do **not** recommend raw PowerShell **`>`** to capture `pg_dump` — it often produces **UTF-16**, breaking `psql` and **corrupting Traditional Chinese**. |
 | **Safe dump** | Prefer **`pg_dump -f /tmp/...` inside the container** + **`docker cp`** to the host, or **`-Fc`** + `pg_restore`. See `docs/DEPLOY_LINODE.md` §E1. |
@@ -63,7 +67,9 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 | `invalid command \%…`, UTF-8 errors, `file` shows UTF-16 | §E1 / §E5 — re-dump with `docker cp` or `-Fc`; `iconv` is last resort for Chinese. |
 | Chinese garbled in UI after restore | §E1 — dump was corrupted on Windows; re-dump UTF-8-safe, full restore again. |
 | Wrong folder on server | §4 — clone folder name = **repo name** (e.g. `horse_dashboard`); `find ~ -name docker-compose.yml`. |
-| Auth / password errors | §5 C2–C3 — align `DATABASE_URL` with volume-initialized credentials. |
+| Auth / password errors for **Postgres** (`password authentication failed`, wrong role) | §5 C2–C3 — align `DATABASE_URL` with volume-initialized credentials. |
+| **Cannot log into the web app** | §5 **C5** — check **Keycloak client** settings (redirect URI, client secret, realm role), plus backend env **`KEYCLOAK_*`** and **`SESSION_SECRET`**; use HTTPS + **`SESSION_COOKIE_SECURE=true`** when on TLS. |
+| Confusing **Postgres password** with **dashboard password** | §5 **C5** — two different systems; DB auth is `POSTGRES_*`, while dashboard login is Keycloak user credentials. |
 | `git pull` / `git push`: **Password authentication is not supported** | §6 **D1** — GitHub HTTPS: use **PAT** or **SSH**, not account password. |
 | `untracked working tree files would be overwritten by merge` | §6 **D1** — move or remove conflicting files (e.g. `backup.sql`), then `git pull`. |
 | Deployed but **still old UI** / old behaviour | §6 **D1** — run `docker compose up -d --build` after pull; hard-refresh browser; confirm `git log -1` on server; use **port 80** or **443**, not `:5173`. |

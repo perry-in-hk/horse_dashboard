@@ -11,7 +11,7 @@ export type AuthUser = {
 type AuthState = {
   user: AuthUser | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: () => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -46,32 +46,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [refresh]);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await fetch(`${apiBase()}/api/auth/login`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-    const text = await res.text();
-    let body: { error?: string; user?: AuthUser } = {};
-    try {
-      body = JSON.parse(text) as { error?: string; user?: AuthUser };
-    } catch {
-      /* ignore */
-    }
-    if (!res.ok) {
-      throw new Error(body.error ?? `Login failed (${res.status})`);
-    }
-    if (body.user) setUser(body.user);
+  const login = useCallback(async () => {
+    window.location.assign(`${apiBase()}/api/auth/login`);
   }, []);
 
   const logout = useCallback(async () => {
-    await fetch(`${apiBase()}/api/auth/logout`, {
+    const res = await fetch(`${apiBase()}/api/auth/logout`, {
       method: "POST",
       credentials: "include",
     });
     setUser(null);
+    if (!res.ok) return;
+    const payload = (await res.json()) as { redirectUrl?: string };
+    if (payload.redirectUrl) {
+      window.location.assign(payload.redirectUrl);
+    }
   }, []);
 
   const value = useMemo(

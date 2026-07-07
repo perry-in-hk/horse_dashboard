@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { pool } from "../db.js";
 import {
   defaultWedSunIsoHk,
-  normalizeHistoricalIsoDates,
+  resolveHistoricalIsoDates,
 } from "../lib/scraperDates.js";
 import { normalizeHorseCodes } from "../lib/horseCodes.js";
 
@@ -126,7 +126,7 @@ router.post("/run", express.json(), async (req, res) => {
   if (key !== "historical" && key !== "horse-details") {
     return res.status(400).json({
       error:
-        'Body must be JSON: { "script": "historical" | "horse-details", "dates"?: string[], "horseCodes"?: string[], "horseDetailsSkipScraped"?: boolean }',
+        'Body must be JSON: { "script": "historical" | "horse-details", "startDate"?: string, "endDate"?: string, "dates"?: string[], "horseCodes"?: string[], "horseDetailsSkipScraped"?: boolean }',
     });
   }
   if (active.has(key)) {
@@ -135,7 +135,13 @@ router.post("/run", express.json(), async (req, res) => {
 
   let extraEnv = {};
   if (key === "historical") {
-    const isoDates = normalizeHistoricalIsoDates(req.body?.dates);
+    let isoDates;
+    try {
+      isoDates = resolveHistoricalIsoDates(req.body?.startDate, req.body?.endDate, req.body?.dates);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return res.status(400).json({ error: msg });
+    }
     const resolved = isoDates.length ? isoDates : defaultWedSunIsoHk();
     try {
       const conflicting = await findConflictingRaceDates(resolved);

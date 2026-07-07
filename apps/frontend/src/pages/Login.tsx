@@ -1,19 +1,21 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.tsx";
+import AppLogo from "../components/AppLogo.tsx";
 
 export default function Login() {
   const { user, loading, login } = useAuth();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const callbackError = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("error");
+  }, []);
 
   if (loading) {
     return (
       <div className="login-page">
-        <p className="muted">Loading…</p>
+        <p className="muted">載入中…</p>
       </div>
     );
   }
@@ -22,52 +24,33 @@ export default function Login() {
     return <Navigate to="/analysis" replace />;
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function onLoginClick() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(username.trim(), password);
+      await login();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
+      setError(err instanceof Error ? err.message : "登入失敗");
       setSubmitting(false);
+      return;
+    } finally {
+      setTimeout(() => setSubmitting(false), 1200);
     }
   }
 
   return (
     <div className="login-page">
       <div className="card login-card">
-        <h1 className="card-title">Sign in</h1>
-        <p className="muted login-lead">HKJC Dashboard</p>
-        <form className="login-form" onSubmit={onSubmit}>
-          <label className="login-label">
-            Username
-            <input
-              className="login-input"
-              type="text"
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </label>
-          <label className="login-label">
-            Password
-            <input
-              className="login-input"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-          {error ? <p className="login-error">{error}</p> : null}
-          <button type="submit" className="btn-primary login-submit" disabled={submitting}>
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+        <div className="login-brand-row">
+          <AppLogo size={36} showWordmark />
+        </div>
+        <h1 className="card-title">使用 Keycloak 登入</h1>
+        <p className="muted login-lead">請透過身分管理平台登入後繼續使用儀表板。</p>
+        {callbackError ? <p className="login-error">登入失敗：{callbackError}</p> : null}
+        {error ? <p className="login-error">{error}</p> : null}
+        <button type="button" className="btn btn-primary login-submit" disabled={submitting} onClick={onLoginClick}>
+          {submitting ? "前往登入中…" : "前往 Keycloak"}
+        </button>
       </div>
     </div>
   );
