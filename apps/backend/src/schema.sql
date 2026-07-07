@@ -335,3 +335,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dashboard_users_keycloak_sub
   WHERE keycloak_sub IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_dashboard_users_username ON dashboard_users (username);
+
+CREATE TABLE IF NOT EXISTS dashboard_audit_log (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  event_type TEXT NOT NULL,
+  success BOOLEAN NOT NULL,
+  username TEXT,
+  user_id INT REFERENCES dashboard_users(id) ON DELETE SET NULL,
+  ip TEXT,
+  user_agent TEXT,
+  detail JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_dashboard_audit_log_created
+  ON dashboard_audit_log (created_at DESC);

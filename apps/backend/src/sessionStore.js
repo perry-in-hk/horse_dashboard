@@ -9,6 +9,9 @@ export function createSessionMiddleware() {
   if (!secret) {
     throw new Error("SESSION_SECRET is required (set a long random string in .env)");
   }
+  const maxAgeHours = Number.parseInt(process.env.SESSION_MAX_AGE_HOURS ?? "24", 10);
+  const sessionMaxAgeMs =
+    Number.isFinite(maxAgeHours) && maxAgeHours > 0 ? maxAgeHours * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
 
   return session({
     store: new PgSession({
@@ -24,7 +27,7 @@ export function createSessionMiddleware() {
       httpOnly: true,
       secure: process.env.SESSION_COOKIE_SECURE === "true",
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: sessionMaxAgeMs,
       path: "/",
     },
   });
