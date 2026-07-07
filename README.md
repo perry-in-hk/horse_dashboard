@@ -23,7 +23,7 @@ docker compose up --build
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:4000/health`
 
-Sign in through the web UI; the API uses **session cookies** (httpOnly), not a shared API key in the browser. Set `SESSION_SECRET`, `AUTH_INITIAL_USERNAME`, and `AUTH_INITIAL_PASSWORD` in `.env` when the database has no users yet (see `.env.example`).
+Sign in through the web UI via **Keycloak OIDC**. The app keeps using **httpOnly session cookies** after callback. Set `SESSION_SECRET`, `KEYCLOAK_CLIENT_SECRET`, `KEYCLOAK_PUBLIC_BASE_URL`, and `KEYCLOAK_INTERNAL_BASE_URL` in `.env` (see `.env.example`).
 
 ## API Endpoints
 
@@ -31,6 +31,14 @@ Sign in through the web UI; the API uses **session cookies** (httpOnly), not a s
 - `GET /api/history/results?limit=20`
 - `GET /api/recommendations/latest`
 - WebSocket: `/ws`
+
+### Database browser (authenticated)
+
+- `GET /api/db/tables` — allowlisted tables with row counts
+- `GET /api/db/tables/:name/columns`
+- `GET /api/db/tables/:name/preview?limit=&offset=`
+
+Browsable tables: HKJC data tables, `hkjc_merged_race_data` (view), `hkjc_odds_snapshots`, and `dashboard_users`. The internal `session` table is excluded. Row counts use PostgreSQL stats with a `COUNT(*)` fallback when stats are still zero after bulk loads.
 
 ## Historical Scraper
 

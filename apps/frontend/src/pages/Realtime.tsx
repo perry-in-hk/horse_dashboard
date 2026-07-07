@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
+import { echartsRealtimeLineChartBase, type ThemeTokens } from "../themeTokens";
+import { useTheme } from "../theme/ThemeContext.tsx";
 import PairOddsMatrix, { buildPairCellMap, type PairPoolType } from "../components/PairOddsMatrix.tsx";
+import PageHeader from "../components/PageHeader.tsx";
 import { normalizePairKeyFromComb } from "../lib/pairComb.ts";
 import { apiFetch } from "../api/client.ts";
 
@@ -17,6 +20,50 @@ const MAX_CHART_SERIES = 18;
 const MAX_PAIR_TIMELINE_SERIES = 12;
 /** Must match Compare page cap when sending a full field to Horse Comparison. */
 const MAX_COMPARE_HORSES = 14;
+
+function oddsDeltaColor(delta: number | null, theme: ThemeTokens): string {
+  if (delta == null) return theme.textFaint;
+  if (delta > 0) return theme.danger;
+  if (delta < 0) return theme.success;
+  return theme.textMuted;
+}
+
+function RealtimeLatestOddsCard(props: {
+  tablePool: string;
+  rows: { comb: string; odds: number; prev: number | null }[];
+  theme: ThemeTokens;
+}) {
+  const { tablePool, rows, theme } = props;
+  return (
+    <div className="card">
+      <h3 className="card-title">Latest {tablePool} (vs previous snapshot)</h3>
+      <div style={{ overflowX: "auto" }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Combination</th>
+              <th>Odds</th>
+              <th>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const delta = row.prev != null && Number.isFinite(row.prev) ? Math.round((row.odds - row.prev) * 100) / 100 : null;
+              return (
+                <tr key={row.comb}>
+                  <td>{row.comb}</td>
+                  <td>{row.odds}</td>
+                  <td style={{ color: oddsDeltaColor(delta, theme) }}>{delta == null ? "—" : delta > 0 ? `+${delta}` : String(delta)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows.length === 0 && <p className="muted">No rows for this pool in the latest snapshot.</p>}
+      </div>
+    </div>
+  );
+}
 
 const POOL_OPTIONS = ["WIN", "PLA", "QIN", "QPL", "FCT", "TCE", "TRI", "FF", "QTT", "DBL"] as const;
 
@@ -338,6 +385,7 @@ function formatHorseCodeDisplay(code: string | undefined): string {
 }
 
 export default function Realtime() {
+  const { tokens: theme } = useTheme();
   const navigate = useNavigate();
   const [meetings, setMeetings] = useState<ActiveMeeting[]>([]);
   const [meetingsErr, setMeetingsErr] = useState<string | null>(null);
@@ -345,6 +393,7 @@ export default function Realtime() {
   const [raceNo, setRaceNo] = useState(1);
   const [chartPool, setChartPool] = useState<PoolOption>("WIN");
   const [tablePool, setTablePool] = useState<PoolOption>("WIN");
+  const [lockPools, setLockPools] = useState(true);
   const [refreshMs, setRefreshMs] = useState(() => readRefreshMs());
   const [timelineHours, setTimelineHours] = useState(() => readTimelineHours());
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
@@ -583,28 +632,10 @@ export default function Realtime() {
 
   const pairChartOption = useMemo(() => {
     return {
-      backgroundColor: "transparent",
-      textStyle: { color: "#94a3b8" },
-      tooltip: { trigger: "axis" as const },
-      legend: {
-        type: "scroll" as const,
-        top: 0,
-        textStyle: { color: "#94a3b8", fontSize: 11 },
-      },
-      grid: { left: 48, right: 16, top: 44, bottom: 24 },
-      xAxis: {
-        type: "time" as const,
-        axisLine: { lineStyle: { color: "#475569" } },
-      },
-      yAxis: {
-        type: "value" as const,
-        scale: true,
-        splitLine: { lineStyle: { color: "#334155" } },
-        axisLine: { lineStyle: { color: "#475569" } },
-      },
+      ...echartsRealtimeLineChartBase(theme),
       series: pairChartSeries,
     };
-  }, [pairChartSeries]);
+  }, [pairChartSeries, theme]);
 
   const chartSeries = useMemo(
     () => buildChartSeries(history, chartPool, MAX_CHART_SERIES),
@@ -615,28 +646,10 @@ export default function Realtime() {
 
   const chartOption = useMemo(() => {
     return {
-      backgroundColor: "transparent",
-      textStyle: { color: "#94a3b8" },
-      tooltip: { trigger: "axis" as const },
-      legend: {
-        type: "scroll" as const,
-        top: 0,
-        textStyle: { color: "#94a3b8", fontSize: 11 },
-      },
-      grid: { left: 48, right: 16, top: 44, bottom: 24 },
-      xAxis: {
-        type: "time" as const,
-        axisLine: { lineStyle: { color: "#475569" } },
-      },
-      yAxis: {
-        type: "value" as const,
-        scale: true,
-        splitLine: { lineStyle: { color: "#334155" } },
-        axisLine: { lineStyle: { color: "#475569" } },
-      },
+      ...echartsRealtimeLineChartBase(theme),
       series: chartSeries,
     };
-  }, [chartSeries]);
+  }, [chartSeries, theme]);
 
   const applyServerInterval = () => {
     setSettingsMsg(null);
@@ -817,36 +830,54 @@ export default function Realtime() {
   }, [watchHorseDetailsScraper]);
 
   const armedList = status ? armedIntervalList(status) : [];
+  const latestSnapshotAt = history.length ? history[history.length - 1].observed_at : null;
+
+  const onChangeChartPool = (next: PoolOption) => {
+    setChartPool(next);
+    if (lockPools) {
+      setTablePool(next);
+    }
+  };
 
   return (
     <div className="realtime-page">
-      <h2 className="card-title" style={{ marginTop: 0 }}>
-        Realtime odds
-      </h2>
+      <PageHeader title="Realtime odds" subtitle="追蹤即時賠率、快照同步與賽事欄位資料。" />
+      <div className="card realtime-context-card" style={{ marginBottom: 16 }}>
+        <div className="realtime-context-main">
+          <p className="realtime-context-line">
+            {meetingDate || "—"} · {venueCode || "—"} · Race {raceNo}
+          </p>
+          <p className="muted realtime-context-meta" style={{ margin: 0 }}>
+            快照數：<strong>{history.length}</strong>
+            {latestSnapshotAt ? <> · 最新：{new Date(latestSnapshotAt).toLocaleString()}</> : null}
+            {loading ? <> · 更新中…</> : null}
+          </p>
+        </div>
+      </div>
       {status && (
         <>
           <p className="muted realtime-worker-line" style={{ marginBottom: 12, fontSize: 13 }}>
-            Server sync: {status.oddsSyncEnabled ? "on" : "off"} · worker {status.workerIntervalMs} ms
+            伺服器同步：{status.oddsSyncEnabled ? "啟用" : "停用"} · 週期 {status.workerIntervalMs} ms
             {status.legacyFullInterval && (
-              <span style={{ color: "#fbbf24" }}> · legacy: full sweep each tick</span>
+              <span className="text-accent"> · 全場掃描模式</span>
             )}
             {status.lastSync?.at && (
               <>
                 {" "}
-                · last {new Date(status.lastSync.at).toLocaleString()}
+                · 最近 {new Date(status.lastSync.at).toLocaleString()}
                 {status.lastSync.result && (
                   <>
                     {" "}
-                    (inserted {status.lastSync.result.inserted ?? 0}, checked {status.lastSync.result.racesChecked ?? 0} races)
+                    （新增 {status.lastSync.result.inserted ?? 0}、檢查 {status.lastSync.result.racesChecked ?? 0} 場）
                   </>
                 )}
-                {status.lastSync.error && <span style={{ color: "#f87171" }}> · {status.lastSync.error}</span>}
+                {status.lastSync.error && <span className="text-danger"> · {status.lastSync.error}</span>}
               </>
             )}
             {status.currentSync?.kind === "full" && (
-              <span style={{ color: "#a5b4fc" }}>
+              <span className="text-info">
                 {" "}
-                · full sweep: {status.currentSync.venue_code} R{status.currentSync.race_no}…
+                · 全場同步中：{status.currentSync.venue_code} R{status.currentSync.race_no}…
               </span>
             )}
           </p>
@@ -857,12 +888,11 @@ export default function Realtime() {
                 <span className="realtime-auto-sync-title">Auto-sync</span>
                 {status.legacyFullInterval ? (
                   <p className="muted realtime-auto-sync-desc" style={{ margin: 0 }}>
-                    Worker runs a <strong>full meeting sweep</strong> on each tick. Per-race stop is not available. Set{" "}
-                    <code>ODDS_SYNC_LEGACY_FULL_INTERVAL=false</code> for single-race interval sync.
+                    目前採用「每次更新掃描整場」模式，無法按單場停止。
                   </p>
                 ) : !status.oddsSyncEnabled ? (
                   <p className="muted realtime-auto-sync-desc" style={{ margin: 0 }}>
-                    HKJC polling is off (<code>ODDS_SYNC_ENABLED=false</code>).
+                    即時同步目前停用。
                   </p>
                 ) : armedList.length ? (
                   <div className="realtime-auto-sync-armed">
@@ -879,8 +909,7 @@ export default function Realtime() {
                   </div>
                 ) : (
                   <p className="muted realtime-auto-sync-desc" style={{ margin: 0 }}>
-                    No race armed for automatic sync. Tick one or more races under Auto-sync races, then &quot;Start
-                    interval (selected races)&quot;.
+                    尚未設定自動同步場次。請在下方勾選場次後啟動。
                   </p>
                 )}
               </div>
@@ -890,9 +919,9 @@ export default function Realtime() {
                   className="btn-secondary realtime-auto-sync-stop"
                   onClick={() => stopIntervalSync()}
                   disabled={intervalSyncLoading || armedList.length === 0}
-                  title="Stop automatic polling for all armed races"
+                  title="停止全部自動同步"
                 >
-                  {intervalSyncLoading ? "…" : "Stop auto-sync"}
+                  {intervalSyncLoading ? "…" : "停止自動同步"}
                 </button>
               )}
             </div>
@@ -911,7 +940,7 @@ export default function Realtime() {
                 aria-controls="realtime-panel-view"
                 onClick={() => setOpenSectionView((v) => !v)}
               >
-                <span className="realtime-section-toggle-text">View & charts</span>
+                <span className="realtime-section-toggle-text">資料檢視</span>
                 <span className="realtime-section-chevron" aria-hidden>
                   {openSectionView ? "▼" : "▶"}
                 </span>
@@ -919,11 +948,11 @@ export default function Realtime() {
             </h3>
             <div id="realtime-panel-view" className="realtime-section-panel" hidden={!openSectionView}>
               <p className="realtime-section-hint muted">
-                Pick meeting, race, and pools; timeline and page refresh control what you see below.
+                選擇賽馬日、場次與彩池。時間範圍與頁面刷新頻率會影響下方圖表與表格。
               </p>
               <div className="realtime-section-body realtime-section-view-controls controls">
                 <div>
-                  <label className="field-label">Meeting</label>
+                  <label className="field-label">賽馬日</label>
                   <select
                     value={meetingIdx}
                     onChange={(e) => setMeetingIdx(Number(e.target.value))}
@@ -937,13 +966,13 @@ export default function Realtime() {
                   </select>
                 </div>
                 <div>
-                  <label className="field-label">Race</label>
+                  <label className="field-label">場次</label>
                   <select value={raceNo} onChange={(e) => setRaceNo(Number(e.target.value))} disabled={!raceNumbers.length}>
                     {raceNumbers.map((n) => {
                       const cnt = raceSnapshotCounts[n] ?? 0;
                       return (
                         <option key={n} value={n}>
-                          Race {n}
+                          第 {n} 場
                           {cnt > 0 ? ` (${cnt} snapshots)` : ""}
                         </option>
                       );
@@ -951,8 +980,8 @@ export default function Realtime() {
                   </select>
                 </div>
                 <div>
-                  <label className="field-label">Chart pool</label>
-                  <select value={chartPool} onChange={(e) => setChartPool(e.target.value as PoolOption)}>
+                  <label className="field-label">圖表彩池</label>
+                  <select value={chartPool} onChange={(e) => onChangeChartPool(e.target.value as PoolOption)}>
                     {POOL_OPTIONS.map((p) => (
                       <option key={p} value={p}>
                         {p}
@@ -961,7 +990,7 @@ export default function Realtime() {
                   </select>
                 </div>
                 <div>
-                  <label className="field-label">Table pool</label>
+                  <label className="field-label">表格彩池</label>
                   <select value={tablePool} onChange={(e) => setTablePool(e.target.value as PoolOption)}>
                     {POOL_OPTIONS.map((p) => (
                       <option key={p} value={p}>
@@ -970,8 +999,12 @@ export default function Realtime() {
                     ))}
                   </select>
                 </div>
+                <label className="realtime-pool-lock">
+                  <input type="checkbox" checked={lockPools} onChange={(e) => setLockPools(e.target.checked)} />
+                  <span>圖表與表格使用同一彩池</span>
+                </label>
                 <div>
-                  <label className="field-label">Timeline</label>
+                  <label className="field-label">時間範圍</label>
                   <select value={timelineHours} onChange={(e) => setTimelineHours(Number(e.target.value))}>
                     {TIMELINE_HOURS_CHOICES.map((h) => (
                       <option key={h} value={h}>
@@ -981,7 +1014,7 @@ export default function Realtime() {
                   </select>
                 </div>
                 <div>
-                  <label className="field-label">Page refresh</label>
+                  <label className="field-label">頁面刷新</label>
                   <select value={refreshMs} onChange={(e) => setRefreshMs(Number(e.target.value))}>
                     {REFRESH_CHOICES_MS.map((ms) => (
                       <option key={ms} value={ms}>
@@ -991,7 +1024,7 @@ export default function Realtime() {
                   </select>
                 </div>
                 <button type="button" className="btn btn-primary" onClick={() => loadHistory()} disabled={loading}>
-                  Refresh now
+                  立即更新
                 </button>
               </div>
             </div>
@@ -1006,7 +1039,7 @@ export default function Realtime() {
                 aria-controls="realtime-panel-sync"
                 onClick={() => setOpenSectionSync((v) => !v)}
               >
-                <span className="realtime-section-toggle-text">Server sync</span>
+                <span className="realtime-section-toggle-text">伺服器同步</span>
                 <span className="realtime-section-chevron" aria-hidden>
                   {openSectionSync ? "▼" : "▶"}
                 </span>
@@ -1014,12 +1047,12 @@ export default function Realtime() {
             </h3>
             <div id="realtime-panel-sync" className="realtime-section-panel" hidden={!openSectionSync}>
               <p className="realtime-section-hint muted">
-                Tick races to include in server polling, then start interval; or run a one-off sync for all active races.
+                勾選要自動同步的場次後啟動；或執行一次全場同步。
               </p>
               <div className="realtime-section-body realtime-section-sync">
                 {!status?.legacyFullInterval && status?.oddsSyncEnabled !== false && raceNumbers.length > 0 && (
                   <div className="realtime-interval-races">
-                    <span className="field-label">Auto-sync races</span>
+                    <span className="field-label">自動同步場次</span>
                     <div className="realtime-interval-races-checks" role="group" aria-label="Races to include in server auto-sync">
                       {raceNumbers.map((n) => (
                         <label key={n} className="realtime-interval-race-check">
@@ -1040,9 +1073,9 @@ export default function Realtime() {
                     className="btn-secondary"
                     onClick={() => runServerSync()}
                     disabled={syncLoading || status?.oddsSyncEnabled === false}
-                    title="Fetch odds for every active meeting and race once (full sweep)"
+                    title="一次同步所有可用場次"
                   >
-                    {syncLoading ? "Syncing…" : "Sync all races (once)"}
+                    {syncLoading ? "同步中…" : "全場同步（一次）"}
                   </button>
                   {!status?.legacyFullInterval && (
                     <button
@@ -1056,9 +1089,9 @@ export default function Realtime() {
                         !venueCode ||
                         intervalSyncRaceNos.length === 0
                       }
-                      title="Poll HKJC on the server interval for each selected race, every worker tick"
+                      title="以伺服器週期輪詢勾選場次"
                     >
-                      {intervalSyncLoading ? "…" : "Start interval (selected races)"}
+                      {intervalSyncLoading ? "…" : "啟動定時同步（所選場次）"}
                     </button>
                   )}
                 </div>
@@ -1075,7 +1108,7 @@ export default function Realtime() {
                 aria-controls="realtime-panel-tools"
                 onClick={() => setOpenSectionTools((v) => !v)}
               >
-                <span className="realtime-section-toggle-text">Data & tools</span>
+                <span className="realtime-section-toggle-text">資料工具</span>
                 <span className="realtime-section-chevron" aria-hidden>
                   {openSectionTools ? "▼" : "▶"}
                 </span>
@@ -1083,14 +1116,13 @@ export default function Realtime() {
             </h3>
             <div id="realtime-panel-tools" className="realtime-section-panel" hidden={!openSectionTools}>
               <p className="realtime-section-hint muted">
-                Match worker interval to how often the server should poll HKJC; bulk horse fetch re-scrapes every code in
-                this meeting (heavy).
+                管理伺服器同步週期與批次馬匹資料更新。
               </p>
               <div className="realtime-section-body realtime-section-tools">
                 {settings?.oddsSyncEnabled !== false && (
                   <div className="realtime-section-tools-worker">
                     <button type="button" className="btn-secondary" onClick={applyServerInterval}>
-                      Apply page refresh interval to server worker
+                      套用目前刷新頻率到伺服器
                     </button>
                     {settings && (
                       <span className="muted realtime-section-tools-meta">
@@ -1107,7 +1139,7 @@ export default function Realtime() {
                   disabled={bulkHorseDetailsLoading || !meetingDate || !venueCode || raceNumbers.length === 0}
                   title="Load racecards for every race in this meeting, then run horse-details on all distinct codes with skip-scraped disabled (full re-upsert for this list)"
                 >
-                  {bulkHorseDetailsLoading ? "Collecting…" : "Fetch horse history (all races)"}
+                  {bulkHorseDetailsLoading ? "整理中…" : "更新全場馬匹歷史"}
                 </button>
               </div>
             </div>
@@ -1120,9 +1152,9 @@ export default function Realtime() {
             {bulkHorseDetailsMsg && (
               <p className="muted" style={{ margin: bulkHorseDetailsErr ? "8px 0 0" : 0 }}>
                 {bulkHorseDetailsMsg}{" "}
-                <Link to="/scraper">Scraper page</Link> for live logs.
+                <Link to="/scraper">前往 Scraper</Link> 查看即時日誌。
                 {watchHorseDetailsScraper && (
-                  <span style={{ color: "#a5b4fc" }}> Running horse-details…</span>
+                  <span className="text-info"> 仍在執行中…</span>
                 )}
               </p>
             )}
@@ -1131,10 +1163,10 @@ export default function Realtime() {
 
         {meetingsErr && <p className="error-text">{meetingsErr}</p>}
         {histErr && <p className="error-text">{histErr}</p>}
-        {loading && <p className="muted">Loading…</p>}
+        {loading && <p className="muted">載入快照中…</p>}
         <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-          Snapshots for <strong>{meetingDate || "—"}</strong> · <strong>{venueCode || "—"}</strong> · race{" "}
-          <strong>{raceNo}</strong>: <strong>{history.length}</strong>
+          目前資料：<strong>{meetingDate || "—"}</strong> · <strong>{venueCode || "—"}</strong> · 第 <strong>{raceNo}</strong>{" "}
+          場，共 <strong>{history.length}</strong> 筆快照
         </p>
       </div>
 
@@ -1158,9 +1190,7 @@ export default function Realtime() {
           </button>
         </div>
         <p className="muted" style={{ margin: "8px 0 0 0", fontSize: 13, maxWidth: 720 }}>
-          <strong>Fetch horse history (all races)</strong> (under <strong>Data & tools</strong>) collects horse codes from
-          every race in this meeting and starts the horse-details job with <strong>skip-scraped off</strong> (re-upserts
-          every code) so profiles and history stay current for Analysis and AI tools.
+          <strong>Fetch horse history (all races)</strong> 會整理本場次全部馬匹並更新歷史資料，方便後續在 Analysis 與智能分析使用。
         </p>
         {raceRunnersLoading && <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>Loading runners…</p>}
         {raceRunnersErr && (
@@ -1179,8 +1209,8 @@ export default function Realtime() {
               marginTop: 10,
               maxHeight: 160,
               overflowY: "auto",
-              border: "1px solid #334155",
-              borderRadius: 8,
+              border: "1px solid var(--border-strong)",
+              borderRadius: "var(--radius-card)",
               fontSize: 12,
             }}
           >
@@ -1230,40 +1260,7 @@ export default function Realtime() {
               <ReactECharts option={pairChartOption} style={{ height: 380 }} opts={{ renderer: "canvas" }} />
             )}
           </div>
-          <div className="card">
-            <h3 className="card-title">Latest {tablePool} (vs previous snapshot)</h3>
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Combination</th>
-                    <th>Odds</th>
-                    <th>Δ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tableRows.map((row) => {
-                    const delta =
-                      row.prev != null && Number.isFinite(row.prev) ? Math.round((row.odds - row.prev) * 100) / 100 : null;
-                    return (
-                      <tr key={row.comb}>
-                        <td>{row.comb}</td>
-                        <td>{row.odds}</td>
-                        <td
-                          style={{
-                            color: delta == null ? "#64748b" : delta > 0 ? "#f87171" : delta < 0 ? "#4ade80" : "#94a3b8",
-                          }}
-                        >
-                          {delta == null ? "—" : delta > 0 ? `+${delta}` : String(delta)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {tableRows.length === 0 && <p className="muted">No rows for this pool in the latest snapshot.</p>}
-            </div>
-          </div>
+          <RealtimeLatestOddsCard tablePool={tablePool} rows={tableRows} theme={theme} />
         </>
       ) : (
         <div className="grid-2">
@@ -1279,49 +1276,12 @@ export default function Realtime() {
               <ReactECharts option={chartOption} style={{ height: 420 }} opts={{ renderer: "canvas" }} />
             )}
           </div>
-          <div className="card">
-            <h3 className="card-title">Latest {tablePool} (vs previous snapshot)</h3>
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Combination</th>
-                    <th>Odds</th>
-                    <th>Δ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tableRows.map((row) => {
-                    const delta =
-                      row.prev != null && Number.isFinite(row.prev) ? Math.round((row.odds - row.prev) * 100) / 100 : null;
-                    return (
-                      <tr key={row.comb}>
-                        <td>{row.comb}</td>
-                        <td>{row.odds}</td>
-                        <td
-                          style={{
-                            color: delta == null ? "#64748b" : delta > 0 ? "#f87171" : delta < 0 ? "#4ade80" : "#94a3b8",
-                          }}
-                        >
-                          {delta == null ? "—" : delta > 0 ? `+${delta}` : String(delta)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {tableRows.length === 0 && <p className="muted">No rows for this pool in the latest snapshot.</p>}
-            </div>
-          </div>
+          <RealtimeLatestOddsCard tablePool={tablePool} rows={tableRows} theme={theme} />
         </div>
       )}
 
       <p className="muted realtime-page-intro" style={{ marginTop: 28, marginBottom: 0, fontSize: 13, lineHeight: 1.55 }}>
-        Snapshots from HKJC GraphQL (worker poll + hash dedup). If pool odds are empty, we use runner win odds from the
-        racecard. Use <strong>Auto-sync races</strong> to choose one or more races for server polling, then{" "}
-        <strong>Start interval (selected races)</strong>; or <strong>Sync all races (once)</strong> for a full sweep. For
-        QIN/QPL matrix + timeline, set <code>ODDS_SYNC_ODDS_TYPES</code> to include <code>QIN</code> and <code>QPL</code>{" "}
-        (see <code>.env.example</code>).
+        建議先選定場次，再啟動定時同步；若要快速補齊資料，可使用「全場同步（一次）」。
       </p>
     </div>
   );

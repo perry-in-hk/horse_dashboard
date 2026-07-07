@@ -1,55 +1,48 @@
 import SystemWorkflowDiagrams from "../components/SystemWorkflowDiagrams.tsx";
-import UserAdminSection from "../components/UserAdminSection.tsx";
+import PageHeader from "../components/PageHeader.tsx";
 
 export default function Settings() {
   return (
     <div className="settings-page">
-      <UserAdminSection />
+      <PageHeader title="Settings" subtitle="查看系統流程與維運資訊。" />
 
       <section className="card settings-intro">
-        <h2 className="card-title">Settings</h2>
+        <h2 className="card-title">操作導覽</h2>
         <p className="muted">
-          Day-to-day tuning uses the <strong>Realtime</strong> page (worker interval, sync) and{" "}
-          <strong>Scraper</strong> jobs. Server-side configuration (database, sessions, integrations) is set in the
-          deployment environment — see your operator’s deployment notes or <code className="settings-inline-code">.env.example</code>{" "}
-          in the repository. Successful <strong>智能分析</strong> runs are stored for later review on the same tab.
+          日常維運建議先在 <strong>Realtime</strong> 監看同步，再以 <strong>Scraper</strong> 進行資料補齊。本頁提供系統流程與維運指引。
+        </p>
+      </section>
+
+      <section className="card settings-intro">
+        <h2 className="card-title">帳號管理</h2>
+        <p className="muted">
+          帳號、密碼與角色由身分管理平台集中維護。若需新增或調整權限，請聯絡系統管理員於 Keycloak 後台處理。
         </p>
       </section>
 
       <section className="card settings-infra">
-        <h2 className="card-title">System overview</h2>
+        <h2 className="card-title">系統流程總覽</h2>
         <p className="settings-infra-lead">
-          The diagrams below use familiar flowchart shapes (similar to common ISO-style flowcharts). The{" "}
-          <strong>first</strong> picture shows <strong>where configuration comes from</strong> (environment variables,
-          Vite build-time values, and UI actions such as the Realtime worker interval). The <strong>second</strong> shows{" "}
-          <strong>end-to-end data movement</strong> between you, the apps, saved data, and public HKJC sources. The{" "}
-          <strong>third</strong> shows the <strong>智能分析 (AI recommendation)</strong> path: assembling context
-          (including odds momentum from snapshots), checking the model reply, saving successful runs, and reloading
-          history. The{" "}
-          <strong>fourth</strong> shows{" "}
-          <strong>how the same project is turned into running software</strong> with Docker. Arrows are labeled in plain
-          language.
+          下方流程圖會依主題色自動調整，分別展示設定來源、資料流、智能分析與部署啟動順序。
         </p>
         <p className="settings-infra-lead settings-infra-note">
-          <strong>Today:</strong> the realtime dashboard and odds history come from the <strong>SQL database</strong>{" "}
-          (PostgreSQL). <strong>Redis</strong> is defined in Docker for possible <strong>future</strong> development
-          (for example caching); the application does not use it yet.
+          這些圖用於日常溝通與維運判讀；若需要實作細節，請參考專案文件。
         </p>
 
         <div className="settings-legend card">
-          <h3 className="settings-legend-title">How to read the shapes</h3>
+          <h3 className="settings-legend-title">圖形說明</h3>
           <ul className="settings-legend-list">
             <li>
-              <strong>Rounded</strong> — a person or a clear start/end point.
+              <strong>圓角形</strong>：使用者或流程起點 / 終點。
             </li>
             <li>
-              <strong>Rectangle</strong> — a program or a step (something that does work).
+              <strong>矩形</strong>：系統步驟或服務節點。
             </li>
             <li>
-              <strong>Cylinder</strong> — stored data (database or cache).
+              <strong>圓柱</strong>：資料儲存層（例如資料庫）。
             </li>
             <li>
-              <strong>Hexagon</strong> — systems outside this project (for example HKJC websites and APIs).
+              <strong>六角形</strong>：外部系統來源。
             </li>
           </ul>
         </div>

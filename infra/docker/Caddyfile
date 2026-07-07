@@ -1,5 +1,8 @@
 # SITE_ADDRESS is set in docker-compose (from .env). Caddy obtains TLS certs automatically (Let's Encrypt).
 {$SITE_ADDRESS} {
+	handle /auth* {
+		reverse_proxy keycloak:8080
+	}
 	handle /api* {
 		reverse_proxy backend:4000
 	}

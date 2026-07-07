@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { apiFetch } from "../api/client.ts";
+import { useTheme } from "../theme/ThemeContext.tsx";
+import PageHeader from "../components/PageHeader.tsx";
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -62,6 +64,12 @@ interface SearchResult {
 /* ── Component ───────────────────────────────────────────────────────────── */
 
 export default function Analysis() {
+  const { tokens: theme } = useTheme();
+  const [loadingInit, setLoadingInit] = useState(true);
+  const [loadingRunners, setLoadingRunners] = useState(false);
+  const [loadingHorse, setLoadingHorse] = useState(false);
+  const [loadingJockey, setLoadingJockey] = useState(false);
+  const [pageErr, setPageErr] = useState<string | null>(null);
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [meetings, setMeetings] = useState<RaceMeeting[]>([]);
 
@@ -88,10 +96,16 @@ export default function Analysis() {
   /* ── Initial load ────────────────────────────────────────────────────── */
 
   useEffect(() => {
-    apiFetch<OverviewStats>("/api/analytics/meta/overview").then(setOverview).catch(() => {});
-    apiFetch<RaceMeeting[]>("/api/analytics/meta/race-dates").then(setMeetings).catch(() => {});
-    apiFetch<JockeyStat[]>(`/api/analytics/jockey-performance?min_races=10&limit=50`).then(setJockeyStats).catch(() => {});
-    apiFetch<SearchResult[]>("/api/analytics/horses/list?limit=8000").then(setHorseList).catch(() => {});
+    setLoadingInit(true);
+    setPageErr(null);
+    Promise.all([
+      apiFetch<OverviewStats>("/api/analytics/meta/overview").then(setOverview),
+      apiFetch<RaceMeeting[]>("/api/analytics/meta/race-dates").then(setMeetings),
+      apiFetch<JockeyStat[]>(`/api/analytics/jockey-performance?min_races=10&limit=50`).then(setJockeyStats),
+      apiFetch<SearchResult[]>("/api/analytics/horses/list?limit=8000").then(setHorseList),
+    ])
+      .catch((e: Error) => setPageErr(e.message))
+      .finally(() => setLoadingInit(false));
   }, []);
 
   /* ── Race drill-down ─────────────────────────────────────────────────── */
@@ -109,7 +123,11 @@ export default function Analysis() {
     const promises = Array.from({ length: meeting.race_count }, (_, i) =>
       apiFetch<Runner[]>(`/api/analytics/race/${date}/${course}/${i + 1}/runners`).catch(() => [])
     );
-    Promise.all(promises).then((all) => setRunners(all.flat()));
+    setLoadingRunners(true);
+    Promise.all(promises)
+      .then((all) => setRunners(all.flat()))
+      .catch((e: Error) => setPageErr(e.message))
+      .finally(() => setLoadingRunners(false));
   }, [selectedMeeting, meetings]);
 
   /* ── Horse search ────────────────────────────────────────────────────── */
@@ -122,7 +140,9 @@ export default function Analysis() {
       return;
     }
     searchTimer.current = setTimeout(() => {
-      apiFetch<SearchResult[]>(`/api/analytics/horses/search?q=${encodeURIComponent(q)}`).then(setSearchResults).catch(() => {});
+      apiFetch<SearchResult[]>(`/api/analytics/horses/search?q=${encodeURIComponent(q)}`)
+        .then(setSearchResults)
+        .catch(() => setSearchResults([]));
     }, 300);
   }, []);
 
@@ -130,16 +150,22 @@ export default function Analysis() {
     setSelectedHorse({ code, name });
     setSearchResults([]);
     setSearchQ(name);
-    apiFetch<HorseRow[]>(`/api/analytics/horses/${code}/history`).then(setHorseHistory).catch(() => {});
+    setLoadingHorse(true);
+    apiFetch<HorseRow[]>(`/api/analytics/horses/${code}/history`)
+      .then(setHorseHistory)
+      .catch((e: Error) => setPageErr(e.message))
+      .finally(() => setLoadingHorse(false));
     setMode("horse");
   }, []);
 
   /* ── Refresh jockey stats when minRaces changes ──────────────────────── */
 
   useEffect(() => {
+    setLoadingJockey(true);
     apiFetch<JockeyStat[]>(`/api/analytics/jockey-performance?min_races=${minRaces}&limit=50`)
       .then(setJockeyStats)
-      .catch(() => {});
+      .catch((e: Error) => setPageErr(e.message))
+      .finally(() => setLoadingJockey(false));
   }, [minRaces]);
 
   /* ── Chart options: Horse score time-series ─────────────────────────── */
@@ -156,29 +182,40 @@ export default function Analysis() {
     return {
       backgroundColor: "transparent",
       tooltip: { trigger: "axis" as const },
-      xAxis: { type: "category" as const, data: dates, axisLabel: { color: "#94a3b8", fontSize: 10, rotate: 45 }, axisLine: { lineStyle: { color: "#334155" } } },
-      yAxis: { type: "value" as const, name: "Race Score", nameTextStyle: { color: "#94a3b8" }, axisLabel: { color: "#94a3b8" }, splitLine: { lineStyle: { color: "#1e293b" } } },
+      xAxis: {
+        type: "category" as const,
+        data: dates,
+        axisLabel: { color: theme.textMuted, fontSize: 10, rotate: 45 },
+        axisLine: { lineStyle: { color: theme.chartAxis } },
+      },
+      yAxis: {
+        type: "value" as const,
+        name: "Race Score",
+        nameTextStyle: { color: theme.textMuted },
+        axisLabel: { color: theme.textMuted },
+        splitLine: { lineStyle: { color: theme.chartSplit } },
+      },
       series: [
         {
           name: "Score",
           type: "line" as const,
           data: scores,
           smooth: true,
-          lineStyle: { color: "#3b82f6" },
-          itemStyle: { color: "#3b82f6" },
+          lineStyle: { color: theme.info },
+          itemStyle: { color: theme.info },
           symbolSize: 6,
           markPoint: champIdx.length
             ? {
-                data: champIdx.map((i) => ({ coord: [dates[i], scores[i]], name: "Win", itemStyle: { color: "#fbbf24" } })),
+                data: champIdx.map((i) => ({ coord: [dates[i], scores[i]], name: "Win", itemStyle: { color: theme.accent } })),
                 symbol: "circle",
                 symbolSize: 14,
-                label: { show: true, formatter: "W", fontSize: 9, color: "#0f172a" },
+                label: { show: true, formatter: "W", fontSize: 9, color: theme.bgPage },
               }
             : undefined,
         },
       ],
     };
-  }, [horseHistory]);
+  }, [horseHistory, theme]);
 
   /* ── Chart options: Jockey win-rate bar chart ──────────────────────── */
 
@@ -189,26 +226,36 @@ export default function Analysis() {
       backgroundColor: "transparent",
       tooltip: { trigger: "axis" as const },
       grid: { left: 120, right: 40, top: 30, bottom: 30 },
-      xAxis: { type: "value" as const, name: "Win Rate %", axisLabel: { color: "#94a3b8" }, splitLine: { lineStyle: { color: "#1e293b" } } },
-      yAxis: { type: "category" as const, data: top20.map((j) => j.jockey).reverse(), axisLabel: { color: "#94a3b8", fontSize: 11 }, axisLine: { lineStyle: { color: "#334155" } } },
+      xAxis: {
+        type: "value" as const,
+        name: "Win Rate %",
+        axisLabel: { color: theme.textMuted },
+        splitLine: { lineStyle: { color: theme.chartSplit } },
+      },
+      yAxis: {
+        type: "category" as const,
+        data: top20.map((j) => j.jockey).reverse(),
+        axisLabel: { color: theme.textMuted, fontSize: 11 },
+        axisLine: { lineStyle: { color: theme.chartAxis } },
+      },
       series: [
         {
           name: "Win Rate",
           type: "bar" as const,
           data: top20.map((j) => Number(j.win_rate)).reverse(),
-          itemStyle: { color: "#3b82f6", borderRadius: [0, 4, 4, 0] },
+          itemStyle: { color: theme.info, borderRadius: [0, 6, 6, 0] },
           barMaxWidth: 18,
         },
         {
           name: "Top-3 Rate",
           type: "bar" as const,
           data: top20.map((j) => Number(j.top3_rate)).reverse(),
-          itemStyle: { color: "#22d3ee", borderRadius: [0, 4, 4, 0] },
+          itemStyle: { color: theme.accent, borderRadius: [0, 6, 6, 0] },
           barMaxWidth: 18,
         },
       ],
     };
-  }, [jockeyStats]);
+  }, [jockeyStats, theme]);
 
   /* ── Aggregate score for horse cards ───────────────────────────────── */
 
@@ -232,6 +279,8 @@ export default function Analysis() {
 
   return (
     <div>
+      <PageHeader title="Analysis" subtitle="掌握賽事、馬匹與騎師表現。" />
+      {loadingInit && <p className="muted">載入分析基礎資料中…</p>}
       {/* Overview stats */}
       {overview && (
         <div className="stat-row">
@@ -244,28 +293,29 @@ export default function Analysis() {
       )}
 
       {/* Controls */}
-      <div className="controls">
-        <button className={`btn ${mode === "race" ? "btn-primary" : "btn-ghost"}`} onClick={() => setMode("race")}>Race View</button>
-        <button className={`btn ${mode === "horse" ? "btn-primary" : "btn-ghost"}`} onClick={() => setMode("horse")}>Horse View</button>
-        <button className={`btn ${mode === "jockey" ? "btn-primary" : "btn-ghost"}`} onClick={() => setMode("jockey")}>Jockey View</button>
+      <div className="card analysis-controls-card">
+        <div className="controls analysis-controls">
+          <div className="analysis-mode-tabs">
+            <button className={`btn ${mode === "race" ? "btn-primary" : "btn-ghost"}`} onClick={() => setMode("race")}>賽事視圖</button>
+            <button className={`btn ${mode === "horse" ? "btn-primary" : "btn-ghost"}`} onClick={() => setMode("horse")}>馬匹視圖</button>
+            <button className={`btn ${mode === "jockey" ? "btn-primary" : "btn-ghost"}`} onClick={() => setMode("jockey")}>騎師視圖</button>
+          </div>
 
-        <span style={{ width: 1, height: 28, background: "#334155" }} />
+          {mode === "race" && (
+            <>
+              <label>賽馬日</label>
+              <select value={selectedMeeting} onChange={(e) => setSelectedMeeting(e.target.value)}>
+                <option value="">選擇賽馬日...</option>
+                {meetings.map((m) => (
+                  <option key={`${m.race_date}|${m.racecourse}`} value={`${m.race_date}|${m.racecourse}`}>
+                    {m.race_date.slice(0, 10)} {m.racecourse} ({m.race_count}R)
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
 
-        {mode === "race" && (
-          <>
-            <label>Meeting</label>
-            <select value={selectedMeeting} onChange={(e) => setSelectedMeeting(e.target.value)}>
-              <option value="">Select a meeting...</option>
-              {meetings.map((m) => (
-                <option key={`${m.race_date}|${m.racecourse}`} value={`${m.race_date}|${m.racecourse}`}>
-                  {m.race_date.slice(0, 10)} {m.racecourse} ({m.race_count}R)
-                </option>
-              ))}
-            </select>
-          </>
-        )}
-
-        {mode === "horse" && (
+          {mode === "horse" && (
           <>
             <label htmlFor="horse-dropdown">Horse</label>
             <select
@@ -284,7 +334,7 @@ export default function Analysis() {
                 if (h) selectHorse(h.horse_code, h.horse_name);
               }}
             >
-              <option value="">Select a horse…</option>
+              <option value="">選擇馬匹…</option>
               {horseList.map((h) => (
                 <option key={h.horse_code} value={h.horse_code}>
                   {h.horse_name} ({h.horse_code}) — {h.race_count} starts
@@ -292,14 +342,19 @@ export default function Analysis() {
               ))}
             </select>
             <div className="search-box">
-              <input placeholder="Or search name / code…" value={searchQ} onChange={(e) => onSearchInput(e.target.value)} />
+              <input placeholder="搜尋馬名或代碼…" value={searchQ} onChange={(e) => onSearchInput(e.target.value)} />
               {searchResults.length > 0 && (
                 <div className="search-results">
                   {searchResults.map((r) => (
-                    <div key={r.horse_code} className="sr-item" onClick={() => selectHorse(r.horse_code, r.horse_name)}>
+                    <button
+                      key={r.horse_code}
+                      type="button"
+                      className="sr-item sr-item-btn"
+                      onClick={() => selectHorse(r.horse_code, r.horse_name)}
+                    >
                       <span>{r.horse_name}</span>
-                      <span style={{ color: "#64748b" }}>{r.horse_code} ({r.race_count})</span>
-                    </div>
+                      <span className="text-faint-inline">{r.horse_code} ({r.race_count})</span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -307,12 +362,14 @@ export default function Analysis() {
           </>
         )}
 
-        {mode === "jockey" && (
-          <>
-            <label>Min Races</label>
-            <input type="number" value={minRaces} min={1} max={500} style={{ width: 70 }} onChange={(e) => setMinRaces(Number(e.target.value) || 1)} />
-          </>
-        )}
+          {mode === "jockey" && (
+            <>
+              <label>最低場次</label>
+              <input type="number" value={minRaces} min={1} max={500} style={{ width: 86 }} onChange={(e) => setMinRaces(Number(e.target.value) || 1)} />
+            </>
+          )}
+        </div>
+        {pageErr && <p className="error-text analysis-inline-msg">{pageErr}</p>}
       </div>
 
       {/* ── Race view ──────────────────────────────────────────────────── */}
@@ -372,8 +429,9 @@ export default function Analysis() {
               </div>
             </>
           )}
-          {!runners.length && selectedMeeting && <p style={{ color: "#64748b" }}>No results for this meeting yet.</p>}
-          {!selectedMeeting && <p style={{ color: "#64748b" }}>Select a meeting above to view race results and horse cards.</p>}
+          {loadingRunners && <p className="muted">載入賽事資料中…</p>}
+          {!runners.length && selectedMeeting && !loadingRunners && <p className="muted">此賽馬日目前沒有可顯示的結果。</p>}
+          {!selectedMeeting && <p className="muted">請先選擇賽馬日以查看賽事結果與馬匹卡片。</p>}
         </>
       )}
 
@@ -429,7 +487,8 @@ export default function Analysis() {
               </div>
             </>
           )}
-          {!selectedHorse && <p style={{ color: "#64748b" }}>Search for a horse above to see its performance history and score trend.</p>}
+          {loadingHorse && <p className="muted">載入馬匹歷史中…</p>}
+          {!selectedHorse && <p className="muted">請先選擇馬匹，查看歷史表現與分數走勢。</p>}
         </>
       )}
 
@@ -468,6 +527,7 @@ export default function Analysis() {
               </table>
             </div>
           </div>
+          {loadingJockey && <p className="muted">更新騎師統計中…</p>}
         </>
       )}
     </div>

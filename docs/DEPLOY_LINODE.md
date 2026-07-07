@@ -14,7 +14,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 |------|----------------|
 | 1 | Create Linode, firewall (**22** + **80**, and **443** if you plan HTTPS), install Docker on the server. |
 | 2 | `git clone` the repo — note the **actual folder name** (e.g. `horse_dashboard`), not necessarily `HKJC_Dashboard`. |
-| 3 | Copy `.env.example` → `.env`; set **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_DB`**, and **`DATABASE_URL`** with the **same** user/password; DB host **`postgres`**, not `localhost`. Add **`SESSION_SECRET`**, **`AUTH_INITIAL_USERNAME`**, and **`AUTH_INITIAL_PASSWORD`** (first boot only, creates the first admin user). |
+| 3 | Copy `.env.example` → `.env`; set **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_DB`**, and **`DATABASE_URL`** with the **same** user/password; DB host **`postgres`**, not `localhost`. Add **`SESSION_SECRET`**, **`KEYCLOAK_CLIENT_SECRET`**, **`KEYCLOAK_PUBLIC_BASE_URL`**, and **`KEYCLOAK_INTERNAL_BASE_URL`** (see [§5 C5](#c5-dashboard-login-via-keycloak-oidc-app-users-not-postgres)). |
 | 4 | `docker compose up -d --build`; open `http://<PUBLIC_IP>/`. The **Analysis** page reads **Postgres on the server** — it will be **empty** until you restore data. |
 | 5 | On your PC, create a dump **without PowerShell destroying UTF-8** (see [§7](#7-phase-e--copy-local-database-to-server-optional) — **recommended:** `pg_dump` to a file **inside** the container, then `docker cp` out). |
 | 6 | `scp` the `.sql` (or `.dump`) file to the server project directory. |
@@ -48,7 +48,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 ## 2. Prerequisites
 
 - Linode account, **Ubuntu 24.04** (or 22.04), **≥2 GB RAM**, region e.g. **Singapore** (good latency from Hong Kong).
-- **SSH** access (password or key).
+- **SSH** access (password or key). Server maintenance uses **`sudo`** after SSH — see [§A5](#a5-ssh-login-and-sudo-on-the-server).
 - **Git** repository URL so the server can `git clone`.
 - On your PC: **Docker Desktop** if you dump the database from local Compose.
 
@@ -90,6 +90,53 @@ docker run --rm hello-world
 
 If you only use **root** over SSH, you do **not** need `usermod -aG docker` unless you add a non-root user later.
 
+### A5. SSH login and sudo on the server
+
+**From your PC (PowerShell or terminal):** you only run **SSH** to open a shell — there is **no `sudo` on your PC** for that step.
+
+```text
+ssh deploy@<PUBLIC_IP>          # or: ssh -i %USERPROFILE%\.ssh\your_key deploy@<PUBLIC_IP>
+```
+
+**This deployment (PowerShell, key `id_ed25519_linode` — update the IP in Linode if it changes):**
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\id_ed25519_linode deploy@139.162.51.138
+```
+
+Use the **SSH key** (and key **passphrase**, if you set one) and/or the server’s policy **for SSH itself**. That is separate from **`sudo`** on the server.
+
+**After you are logged in** as a normal user (e.g. **`deploy`** with **`sudo`** group):
+
+| Situation | Command pattern |
+|-----------|------------------|
+| **Full root shell** (install packages, edit system files, `docker` if your user is not in `docker` group) | `sudo -i` or `sudo su -`, then run commands; type `exit` to leave root. |
+| **One command as root** | `sudo apt update`, `sudo systemctl restart ssh`, `sudo nano /etc/...` |
+| **App / Compose in project dir** | `cd ~/YOUR_REPO_FOLDER` then `docker compose ...` — use **`sudo docker compose`** only if your user cannot run Docker without it (see [A4](#a4-install-docker-on-the-server)). |
+| **Updates** (maintenance) | `sudo apt update && sudo apt upgrade` — then **`sudo reboot`** if the kernel changed or the login banner says a restart is required. |
+
+**Passwords (do not mix them up):**
+
+- **SSH key passphrase** (optional): unlocks the **private key on your PC** when `ssh` runs. Not the same as Linux.
+- **`sudo` password**: when `sudo` asks for **`[sudo] password for deploy:`**, that is the **Linux account password** for the user you SSH’d in as (unless you configured passwordless sudo).
+
+**If direct `ssh root@...` is disabled** (`PermitRootLogin no` is common): log in as **`deploy`**, then use **`sudo -i`** for root tasks — you do not need root SSH for maintenance.
+
+**Optional reading:** host hardening and SSH keys are summarized in **`docs/CYBER_SECURITY.md`**.
+
+### A5b. `deploy` user vs `root` — where is `docker-compose.yml`?
+
+If you **cloned and ran Docker as `root`**, the project lives under **`/root/<repo-folder>`** (e.g. **`/root/horse_dashboard`**). User **`deploy`** cannot **`cd` into `/root`** (permission denied), and **`find ~ -name docker-compose.yml`** finds nothing because **`~` is `/home/deploy`**, not `/root`.
+
+| Task | Command |
+|------|---------|
+| Find compose under root’s home | `sudo find /root -name 'docker-compose.y*ml' 2>/dev/null` |
+| Edit server `.env` | `sudo nano /root/horse_dashboard/.env` (use your real folder name) |
+| Run Compose from `/root` tree | `sudo bash -c 'cd /root/horse_dashboard && docker compose up -d --build'` — or **`sudo -i`**, then **`cd`** and **`docker compose`** |
+| Optional: run stack as `deploy` | `sudo mv /root/horse_dashboard /home/deploy/` then **`sudo chown -R deploy:deploy /home/deploy/horse_dashboard`** (adjust names); add **`deploy`** to **`docker`** group if needed |
+
+**Shell stderr redirect:** use **`2>/dev/null`** to hide “Permission denied” noise from `find`. **`2>/dev/`** is wrong (**`/dev/`** is a directory) → bash reports **`Is a directory`**.
+
 ---
 
 ## 4. Phase B — Get code on the server
@@ -125,7 +172,12 @@ You can also paste from your PC via `scp` or editor — see [§8](#8-challenges-
 | `DATABASE_URL` | Same **user** and **password** as above; host must be **`postgres`** (Docker service name), **not** `localhost`: `postgresql://USER:PASSWORD@postgres:5432/hkjc_dashboard` |
 | `REDIS_URL` | Usually `redis://redis:6379` |
 | `SESSION_SECRET` | Long random string; signs session cookies |
-| `AUTH_INITIAL_USERNAME` / `AUTH_INITIAL_PASSWORD` | **Only** when `dashboard_users` is empty — creates the first admin |
+| `KEYCLOAK_REALM` | Realm name, default `hkjc` |
+| `KEYCLOAK_CLIENT_ID` | OIDC client id, default `hkjc-dashboard` |
+| `KEYCLOAK_CLIENT_SECRET` | OIDC confidential client secret (required) |
+| `KEYCLOAK_PUBLIC_BASE_URL` | Browser-facing Keycloak URL, e.g. `https://yourname.duckdns.org/auth` |
+| `KEYCLOAK_INTERNAL_BASE_URL` | Backend-to-Keycloak URL inside Compose, usually `http://keycloak:8080/auth` |
+| `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | Keycloak admin console bootstrap account |
 | `SITE_ADDRESS` | Public hostname for Caddy (e.g. `yourname.duckdns.org`). Required for TLS in Compose; must match DNS **A** record to this server. |
 | `SESSION_COOKIE_SECURE` | Set **`true`** when users only use **HTTPS** so session cookies are `Secure` (recommended with TLS). |
 
@@ -141,6 +193,21 @@ Postgres initializes credentials **only on first** creation of its data director
 ### C4. Frontend + Caddy (`VITE_*`)
 
 With Compose, the **frontend** service may set `VITE_API_URL` to `""` so the browser uses **same-origin** `/api/...` through Caddy. You do not need `http://localhost:4000` on the server for that pattern.
+
+### C5. Dashboard login via Keycloak OIDC (app users, not Postgres)
+
+The **HKJC Dashboard** login (browser → `/api/auth/login`) is **separate** from **`POSTGRES_PASSWORD`**. Postgres credentials are for the database container; user identity is authenticated by **Keycloak** and mapped to `dashboard_users` by `keycloak_sub`.
+
+| Topic | What to know |
+|--------|----------------|
+| **Admin/user provisioning** | Create operators in **Keycloak Admin Console** (`/auth/admin`) and assign realm roles (`admin`, `user`). |
+| **First login mapping** | On callback, backend stores `keycloak_sub` + `username` + `role` in `dashboard_users`; no app password is stored. |
+| **Role changes** | Change role in Keycloak, then have the user sign out and sign in again to refresh mapped role. |
+| **`SESSION_SECRET`** | Required. Used to sign the **session cookie** (`connect-pg-simple` / Express session). Use a long random value per deployment (see `.env.example`). |
+| **`SESSION_COOKIE_SECURE`** | Set **`true`** when everyone uses **HTTPS** so the session cookie is sent only over TLS (see [§9](#9-https-with-a-hostname-optional)). |
+| **Transport** | Treat **HTTP (port 80) to a public IP** as **not** private for passwords: prefer **HTTPS** for anything beyond quick testing. |
+
+**Do not confuse:** **`DATABASE_URL`** / **`POSTGRES_*`** authenticate the **backend → Postgres** link. **Keycloak realm users + roles** define human operators of the web app.
 
 ---
 
@@ -367,13 +434,17 @@ docker compose exec -T postgres pg_dump -U YOUR_USER -d hkjc_dashboard --no-owne
 | Horse names / Chinese show **mojibake** in UI after restore | UTF-8 was **mis-decoded when the dump was written on Windows** | Re-dump with [§E1](#e1-dump-on-windows-recommended-utf-8-safe); verify Chinese in the `.sql` **before** `scp` |
 | `relation already exists` on restore | Full dump applied when schema **already** exists | Use **`--data-only`** from local, or **drop + create** the database ([§E4](#e4-restore-on-the-server)) |
 | UI works but **no cloud data** | Server DB is empty / separate volume | Restore data ([§7](#7-phase-e--copy-local-database-to-server-optional)) or re-run scrapers on the server |
-| `cd` wrong folder after clone | Clone directory = **repo name** | `find ~ -name docker-compose.yml`; `cd` into that folder |
+| `cd` wrong folder after clone | Clone directory = **repo name** | `find ~ -name docker-compose.yml 2>/dev/null`; `cd` into that folder |
+| **`find ~` returns nothing**; empty **`deploy`** home | Repo was cloned as **`root`** under **`/root`** (e.g. `horse_dashboard`) | `sudo find /root -name 'docker-compose.y*ml' 2>/dev/null` — see [A5b](#a5b-deploy-user-vs-root--where-is-docker-composeyml) |
+| **`cd: /root/...: Permission denied`** | Only **`root`** may **`cd /root`** | `sudo -i` or `sudo bash -c 'cd /root/… && …'` ([A5b](#a5b-deploy-user-vs-root--where-is-docker-composeyml)) |
+| **`no configuration file provided: not found`** (`docker compose`) | Compose ran in a directory **without** `docker-compose.yml` (often after a failed **`cd`**) | **`cd`** to the project folder first; from **`deploy`**, use **`sudo bash -c 'cd /root/… && docker compose …'`** ([A5b](#a5b-deploy-user-vs-root--where-is-docker-composeyml)) |
 | **`git pull`**: `untracked working tree files would be overwritten` | Local untracked files (e.g. `backup.sql`) **same path** as files coming from the remote branch | Move or `rm` those files, then `git pull` again ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
 | **`git pull` / `git push`**: `Password authentication is not supported` | GitHub **HTTPS** no longer accepts account passwords | Use a **Personal Access Token** as the password, or use **SSH** remote + SSH key ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
 | Site still **old UI** after deploy | No `docker compose up --build`, wrong folder, or browser cache | `git log -1`; `docker compose up -d --build`; hard refresh; use **port 80** not `:5173` ([§6 D1](#d1-server-updates-git-pull-and-rebuild)) |
 | **`Blocked request. This host ("…") is not allowed`** | **Vite 8+** `server.allowedHosts` — reverse proxy sends real hostname | Set **`allowedHosts: true`** in `apps/frontend/vite.config.ts` under `server`, rebuild: `docker compose up -d --build frontend` ([§9.4](#94-common-https--vite-issues)) |
 | **`Set SITE_ADDRESS in .env`** (Compose error) | **`SITE_ADDRESS`** unset on server | Add to server `.env`: `SITE_ADDRESS=yourname.duckdns.org` (must match DNS) ([§9.2](#92-server-env-and-redeploy)) |
 | **HTTPS fails / ACME errors** | DNS not pointing here yet, or **80** blocked | Wait for DNS; ensure firewall allows **80** and **443**; `curl -I http://yourname.duckdns.org/.well-known/acme-challenge/` (after Caddy runs) ([§9](#9-https-with-a-hostname-optional)) |
+| **“Server Not Found”**, **NXDOMAIN**, or **Cloudflare 525** / ACME **`no valid A records`** | Registrar hold, NS vs A record mismatch, wrong **Name** in Cloudflare for a subdomain zone, or Proxied before cert issuance | See [§9.6](#96-common-deployment-issues-dns-registrar-cloudflare) |
 | Session lost after switching to HTTPS | Cookie not **Secure** | Set **`SESSION_COOKIE_SECURE=true`** in `.env` when using HTTPS only ([§9.2](#92-server-env-and-redeploy)) |
 
 ---
@@ -422,6 +493,62 @@ The app **does not currently read `VITE_WS_URL` in code** (only documented in di
 
 **Security note:** `allowedHosts` does not replace **login**, **firewall**, or **TLS** — it only relaxes Vite’s host check so the dev server works behind a reverse proxy. For stricter public hardening, consider serving a **`vite build`** static `dist/` via Caddy instead of **`vite dev`** in Docker (larger change).
 
+### 9.5 Cloudflare in front (optional — hide origin IP)
+
+Use a **domain you control** (registrar / DNS host such as **dnshe.com**). **DuckDNS** is separate; **`SITE_ADDRESS`** must match the **hostname users open** (e.g. `lord-in-hk.ccwu.cc`), not an old DuckDNS name unless you still use that URL.
+
+| Topic | What to do |
+|--------|------------|
+| **Nameservers vs A record** | At the **registrar**, set **nameservers** to **only** Cloudflare’s pair (e.g. `conrad.ns.cloudflare.com`, `danica.ns.cloudflare.com`). That is **not** the same as an **A** record — the **A** record’s **content** is your **Linode public IP**, entered under **Cloudflare → DNS** (usually **Proxied** / orange cloud). |
+| **Delegation** | Until the zone shows **Active** in Cloudflare and `nslookup -type=NS yourdomain` lists Cloudflare, DNS is still propagating. |
+| **Server `.env`** | **`SITE_ADDRESS=your.domain`** and **`SESSION_COOKIE_SECURE=true`**; redeploy Compose ([§9.2](#92-server-env-and-redeploy)). |
+| **SSL/TLS** in Cloudflare | Prefer **Full (strict)** when Caddy has a valid Let’s Encrypt cert for **`SITE_ADDRESS`**. |
+| **Firewall (later)** | Optionally restrict **80/443** to [Cloudflare IP ranges](https://www.cloudflare.com/ips/) only; keep **SSH (22)** locked to **your** IP — not Cloudflare. |
+
+### 9.6 Common deployment issues (DNS, registrar, Cloudflare)
+
+This section summarizes problems that look like “the server is down” but are often **DNS or TLS issuance**, not Docker or Caddy bugs.
+
+#### A. Browser: “Server Not Found” / `nslookup` → Non-existent domain
+
+| Cause | What to check |
+|--------|----------------|
+| **Registrar hold** (incomplete WHOIS/contact, suspension, non-renewal) | At the **registrar**, confirm the domain is **active**, contact data complete, and no **clientHold** / verification pending. |
+| **Wrong hostname** | The name in the address bar must match **`SITE_ADDRESS`** on the server and your **DNS records**. |
+| **No delegation to authoritative DNS** | `nslookup -type=NS your-domain` must eventually show the nameservers you intend (registrar, Cloudflare, etc.). |
+
+**Not the cause:** Setting **`SITE_ADDRESS`** on your **local PC** only affects that machine’s Compose; it does **not** change public DNS or the Linode server.
+
+#### B. A record exists in Cloudflare but the site still does not resolve
+
+| Cause | What to check |
+|--------|----------------|
+| **Authoritative NS mismatch** | If the **TLD** still points **`ccwu.cc`** (example) to **registrar NS** (`ns1.dnshe.com`), but you only created the **A** record in **Cloudflare**, resolvers ask the registrar — not Cloudflare — and get **no A record**. **Fix:** either **change `ccwu.cc` nameservers** at the registrar to **Cloudflare’s pair** for that zone, **or** add the same **A** record at the **registrar** DNS. |
+| **Subdomain delegated to Cloudflare** | If **`lord-in-hk.ccwu.cc`** is its **own** zone in Cloudflare, the **apex** of that zone is **`lord-in-hk.ccwu.cc`**. The DNS **Name** should be **`@`**, not **`lord-in-hk`** (which would create **`lord-in-hk.lord-in-hk.ccwu.cc`**). |
+
+#### C. Cloudflare **525** (“SSL handshake failed”) after DNS works
+
+| Cause | What to check |
+|--------|----------------|
+| **Origin has no valid cert yet** | Caddy must finish **Let’s Encrypt** for **`SITE_ADDRESS`**. Check: `docker compose logs caddy` on the server. |
+| **Cloudflare SSL mode too weak or wrong** | Use **Full** or **Full (strict)** once the origin has a real cert ([§9.5](#95-cloudflare-in-front-optional--hide-origin-ip)). |
+
+#### D. Caddy / Let’s Encrypt: `no valid A records found` (ACME DNS error)
+
+Let’s Encrypt must resolve your hostname to an address **before** it runs the HTTP challenge. If the name was broken or **in retry backoff**, issuance fails until DNS is stable.
+
+| Cause | What to do |
+|--------|------------|
+| **Orange cloud (Proxied) during first issuance** | Temporarily set the **A** record to **DNS only** (grey cloud) so public resolvers see your **Linode IP** and HTTP-01 can reach **Caddy on :80**. After **`docker compose logs caddy`** shows a successful certificate, switch back to **Proxied** and set **SSL/TLS → Full (strict)**. |
+| **Repeated failures** | After fixing DNS, **`docker compose restart caddy`**. If errors persist, inspect logs; in rare cases clearing only Caddy’s cert storage volumes (see project `docker-compose.yml` volume names) and recreating **caddy** may be needed — **do not** remove Postgres volumes. |
+
+#### E. Operational checklist (quick)
+
+1. **`nslookup your.hostname 1.1.1.1`** — must return an **Address** (or Cloudflare anycast if proxied).  
+2. **Server `.env`:** **`SITE_ADDRESS`** = exact public hostname; **`SESSION_COOKIE_SECURE=true`** for HTTPS-only.  
+3. **`docker compose up -d --build`** from the correct project directory ([A5b](#a5b-deploy-user-vs-root--where-is-docker-composeyml)).  
+4. **Cloudflare:** turn **Under Attack Mode** off unless you are under attack (it adds an interstitial for all visitors).
+
 ---
 
 ## 10. Security reminders
@@ -429,7 +556,8 @@ The app **does not currently read `VITE_WS_URL` in code** (only documented in di
 - Do **not** commit `.env` or share **secrets** (passwords, `SESSION_SECRET`, `OPENAI_API_KEY`, etc.) in public chats.
 - Restrict firewall **22** to your IP when possible.
 - Avoid exposing Postgres **5432** / Redis **6379** to the public internet in production-oriented setups.
-- **HTTPS:** Use strong **`AUTH_*`** / dashboard passwords; TLS and **`allowedHosts`** do not replace authentication. With HTTPS-only access, set **`SESSION_COOKIE_SECURE=true`** (see [§9](#9-https-with-a-hostname-optional)).
+- **Dashboard auth:** Credentials are managed by **Keycloak**, not by app-local passwords. Protect `KEYCLOAK_ADMIN_PASSWORD` and `KEYCLOAK_CLIENT_SECRET`.
+- **HTTPS:** Use strong Keycloak credentials and role assignment policy; TLS and **`allowedHosts`** do not replace authentication. With HTTPS-only access, set **`SESSION_COOKIE_SECURE=true`** (see [§9](#9-https-with-a-hostname-optional)).
 
 ---
 
@@ -441,7 +569,7 @@ The app **does not currently read `VITE_WS_URL` in code** (only documented in di
 # Server:
 git clone <repo-url>
 cd <repo-folder>    # e.g. horse_dashboard — use real clone name
-cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSION_SECRET; AUTH_INITIAL_* (first admin)
+cp .env.example .env && nano .env   # POSTGRES_* + DATABASE_URL @postgres; SESSION_SECRET; KEYCLOAK_* variables
 
 docker compose up -d --build
 curl -sS http://127.0.0.1/health

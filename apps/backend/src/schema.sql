@@ -314,13 +314,24 @@ CREATE TABLE IF NOT EXISTS hkjc_ai_analyses (
 CREATE INDEX IF NOT EXISTS idx_hkjc_ai_analyses_race_time
   ON hkjc_ai_analyses (meeting_date, venue_code, race_no, created_at DESC);
 
--- Dashboard login (session rows are created by connect-pg-simple when createTableIfMissing runs)
+-- Dashboard identities (session rows are created by connect-pg-simple when createTableIfMissing runs)
 CREATE TABLE IF NOT EXISTS dashboard_users (
   id SERIAL PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
+  password_hash TEXT,
   role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+  keycloak_sub TEXT UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE dashboard_users
+  ALTER COLUMN password_hash DROP NOT NULL;
+
+ALTER TABLE dashboard_users
+  ADD COLUMN IF NOT EXISTS keycloak_sub TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dashboard_users_keycloak_sub
+  ON dashboard_users (keycloak_sub)
+  WHERE keycloak_sub IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_dashboard_users_username ON dashboard_users (username);

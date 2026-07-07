@@ -1,0 +1,56 @@
+{
+  "realm": "hkjc",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "roles": {
+    "realm": [
+      { "name": "admin" },
+      { "name": "user" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "hkjc-dashboard",
+      "name": "HKJC Dashboard",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://localhost/api/auth/callback",
+        "https://*/api/auth/callback",
+        "http://localhost/api/auth/callback",
+        "http://localhost:5173/api/auth/callback",
+        "http://localhost:4000/api/auth/callback"
+      ],
+      "webOrigins": [
+        "https://localhost",
+        "http://localhost",
+        "http://localhost:5173",
+        "http://localhost:4000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/login##http://localhost/login##http://localhost:4000/login##https://localhost/login##https://*/login"
+      },
+      "defaultClientScopes": ["profile", "email", "roles"]
+    }
+  ],
+  "browserFlow": "browser",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "passwordPolicy": "length(12) and notUsername(undefined)"
+}

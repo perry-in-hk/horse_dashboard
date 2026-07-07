@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../api/client.ts";
+import PageHeader from "../components/PageHeader.tsx";
 
 interface ActiveRace {
   no?: string;
@@ -125,11 +126,7 @@ function isRaceAnalysisStructured(raw: unknown): raw is RaceAnalysisStructured {
 
 const AI_REC_FOOTNOTE = (
   <>
-    根據即時馬匹名單、資料庫近績（合併歷史），以及最新賠率快照中的獨贏／位置與<strong>連贏（QIN）／位置Q（QPL）</strong>
-    組合（若有同步）。分析以<strong>繁體中文</strong>輸出，並含「位置Q（QPL）與連贏（QIN）」專節（以位置Q為重點），以及「
-    <strong>職業馬迷視角：假設性彩池取向</strong>」與「<strong>大注資金流追蹤（短時間賠率急跌）</strong>」專節——會寫明模擬的
-    <strong>獨贏、位置、QPL、QIN</strong>具體馬號／組合（教學示範，非保證）。智能分析需由伺服器啟用 AI 服務。若需 QPL／QIN
-    賠率，請於 Realtime 同步包含該等彩池之場次。
+    分析基於當前場次的歷史資料、快照與即時欄位生成。若需完整 QPL / QIN 內容，請先在 Realtime 完成對應彩池同步。
   </>
 );
 
@@ -410,12 +407,22 @@ export default function AiRecommendation() {
 
   return (
     <div className="ai-rec-page">
-      <h2 className="card-title" style={{ marginTop: 0 }}>
-        智能分析（AI）
-      </h2>
+      <PageHeader title="智能分析（AI）" subtitle="產生、比對並回看賽事分析結果。" />
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="controls" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+      <div className="card ai-rec-context-card">
+        <p className="status-line">
+          當前情境：
+          {meetingDate && venueCode ? ` ${meetingDate} · ${venueCode} · 第 ${raceNo} 場` : " 尚未選擇場次"}
+        </p>
+        {meetingDate && venueCode && (
+          <p className="muted ai-rec-context-meta">
+            快照狀態：{snapN > 0 ? `已儲存 ${snapN} 筆` : "尚無快照，將以可用資料生成分析"}
+          </p>
+        )}
+      </div>
+
+      <div className="card ai-rec-action-card">
+        <div className="controls action-row ai-rec-action-row">
           <div>
             <label className="field-label">賽馬日／場地</label>
             <select
@@ -444,7 +451,7 @@ export default function AiRecommendation() {
               ))}
             </select>
           </div>
-          <button type="button" className="btn-primary" onClick={() => runAnalyze()} disabled={analyzing || !meetingDate}>
+          <button type="button" className="btn btn-primary" onClick={() => runAnalyze()} disabled={analyzing || !meetingDate}>
             {analyzing ? "分析中…" : "產生分析"}
           </button>
         </div>
@@ -453,7 +460,7 @@ export default function AiRecommendation() {
             <label className="field-label" htmlFor="ai-saved-select">
               已儲存分析（資料庫）
             </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <div className="action-row ai-rec-saved-controls">
               <select
                 id="ai-saved-select"
                 value={analysis?.meta?.saved_id != null ? String(analysis.meta.saved_id) : ""}
@@ -481,38 +488,31 @@ export default function AiRecommendation() {
                   </option>
                 ))}
               </select>
-              {loadingSaved && <span className="muted" style={{ fontSize: 13 }}>載入清單中…</span>}
+              {loadingSaved && <span className="muted status-line">載入清單中…</span>}
             </div>
           </div>
         )}
-        {meetingsErr && <p className="muted" style={{ marginTop: 12, color: "#f87171" }}>{meetingsErr}</p>}
-        {meetingDate && venueCode && (
-          <p className="muted" style={{ marginTop: 12, marginBottom: 0, fontSize: 13 }}>
-            本場已儲存之賠率快照列數：{" "}
-            {snapN > 0 ? (
-              <>
-                第 {raceNo} 場共 <strong>{snapN}</strong> 筆
-              </>
-            ) : (
-              <>第 {raceNo} 場尚無（分析將盡量使用馬匹顯示的獨贏賠率）</>
-            )}
-            。需要完整彩池（含 QPL／QIN）請於 Realtime 頁同步。
+        {meetingsErr && (
+          <p className="error-text ai-rec-error-line">
+            {meetingsErr}
           </p>
         )}
       </div>
 
       {analysisErr && (
-        <div className="card ai-rec-error" style={{ marginBottom: 16 }}>
-          <p style={{ margin: 0, color: "#f87171" }}>{analysisErr}</p>
+        <div className="card ai-rec-error">
+          <p className="error-text">
+            {analysisErr}
+          </p>
         </div>
       )}
 
       {analysis && (
         <section className="card ai-rec-output-wrap">
           {analysis.meta && (
-            <p className="muted ai-rec-meta" style={{ marginTop: 0 }}>
-              {analysis.meta.meeting_date} · {analysis.meta.venue_code} · 第{analysis.meta.race_no}場 · 獨贏/位置來源：{" "}
-              {analysis.meta.odds_source}
+            <p className="muted ai-rec-meta">
+              {analysis.meta.meeting_date} · {analysis.meta.venue_code} · 第{analysis.meta.race_no}場
+              {" · "}來源：{analysis.meta.odds_source}
               {analysis.meta.output_format && (
                 <>
                   {" "}
@@ -532,13 +532,7 @@ export default function AiRecommendation() {
               {analysis.model && (
                 <>
                   {" "}
-                  · 模型 {analysis.model}
-                </>
-              )}
-              {analysis.usage?.total_tokens != null && (
-                <>
-                  {" "}
-                  · 約 {analysis.usage.total_tokens} tokens
+                  · {analysis.model}
                 </>
               )}
               {analysis.meta?.saved_id != null && (

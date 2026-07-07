@@ -56,8 +56,8 @@ export default function PairOddsMatrix(props: {
                 style={{
                   minWidth: 28,
                   padding: 4,
-                  background: "#1e293b",
-                  border: "1px solid #475569",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-strong)",
                 }}
               />
               {nums.map((j) => (
@@ -67,9 +67,9 @@ export default function PairOddsMatrix(props: {
                     minWidth: 44,
                     padding: 4,
                     textAlign: "center",
-                    background: "#1e3a5f",
-                    color: "#e2e8f0",
-                    border: "1px solid #475569",
+                    background: "var(--bg-selected)",
+                    color: "var(--text-primary)",
+                    border: "1px solid var(--border-strong)",
                   }}
                 >
                   {j}
@@ -84,9 +84,9 @@ export default function PairOddsMatrix(props: {
                   style={{
                     padding: 4,
                     textAlign: "center",
-                    background: "#1e3a5f",
-                    color: "#e2e8f0",
-                    border: "1px solid #475569",
+                    background: "var(--bg-selected)",
+                    color: "var(--text-primary)",
+                    border: "1px solid var(--border-strong)",
                   }}
                 >
                   {i}
@@ -97,8 +97,8 @@ export default function PairOddsMatrix(props: {
                       <td
                         key={`${i}-${j}`}
                         style={{
-                          background: "#0f172a",
-                          border: "1px solid #1e293b",
+                          background: "var(--bg-page)",
+                          border: "1px solid var(--border-subtle)",
                           minWidth: 44,
                           height: 32,
                         }}
@@ -128,9 +128,9 @@ export default function PairOddsMatrix(props: {
                         cursor: "pointer",
                         textAlign: "center",
                         padding: "4px 6px",
-                        border: sel ? "2px solid #60a5fa" : `1px solid ${String(st.borderColor ?? "#475569")}`,
+                        border: sel ? "2px solid var(--color-accent)" : `1px solid ${String(st.borderColor ?? "var(--border-strong)")}`,
                         fontWeight: sel ? 700 : 500,
-                        color: "#f8fafc",
+                        color: "var(--text-primary)",
                         userSelect: "none",
                       }}
                     >
@@ -143,17 +143,17 @@ export default function PairOddsMatrix(props: {
           </tbody>
         </table>
       </div>
-      <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap", fontSize: 11, color: "#94a3b8" }}>
+      <div className="muted" style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap", fontSize: 11 }}>
         <span>
-          <span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(248,113,113,0.5)", marginRight: 4 }} />
+          <span style={{ display: "inline-block", width: 12, height: 12, background: "var(--pair-hot-bg)", marginRight: 4 }} />
           熱門
         </span>
         <span>
-          <span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(74,222,128,0.25)", marginRight: 4 }} />
+          <span style={{ display: "inline-block", width: 12, height: 12, background: "var(--pair-drop20-bg)", marginRight: 4 }} />
           賠率下降 20%
         </span>
         <span>
-          <span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(180,83,9,0.4)", marginRight: 4 }} />
+          <span style={{ display: "inline-block", width: 12, height: 12, background: "var(--pair-drop50-bg)", marginRight: 4 }} />
           賠率下降 50%
         </span>
       </div>

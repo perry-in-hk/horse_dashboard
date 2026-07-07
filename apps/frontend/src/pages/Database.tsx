@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../api/client.ts";
+import PageHeader from "../components/PageHeader.tsx";
 
 interface TableInfo {
   table_name: string;
@@ -38,17 +39,25 @@ function confirmToken(k: SnapshotKeyRow): string {
 }
 
 function formatSnapshotKeyLabel(k: SnapshotKeyRow): string {
-  return `${k.meeting_date} · ${k.venue_code} · Race ${k.race_no} (${k.n.toLocaleString()} rows)`;
+  return `${k.meeting_date} · ${k.venue_code} · 第 ${k.race_no} 場（${k.n.toLocaleString()} 筆）`;
 }
 
 export default function Database() {
   const [tables, setTables] = useState<TableInfo[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(true);
+  const [tablesErr, setTablesErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
+  const [columnsLoading, setColumnsLoading] = useState(false);
+  const [columnsErr, setColumnsErr] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [schemaOpen, setSchemaOpen] = useState(false);
 
   const [snapshotKeys, setSnapshotKeys] = useState<SnapshotKeyRow[]>([]);
+  const [snapshotKeysLoading, setSnapshotKeysLoading] = useState(false);
   const [snapshotKeysErr, setSnapshotKeysErr] = useState<string | null>(null);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
   const [purgeModalOpen, setPurgeModalOpen] = useState(false);
@@ -60,6 +69,7 @@ export default function Database() {
 
   const loadSnapshotKeys = useCallback(() => {
     setSnapshotKeysErr(null);
+    setSnapshotKeysLoading(true);
     return apiFetch<{ keys: SnapshotKeyRow[] }>("/api/realtime/snapshot-keys")
       .then((r) => {
         const keys = r.keys ?? [];
@@ -72,11 +82,20 @@ export default function Database() {
       .catch((e: Error) => {
         setSnapshotKeysErr(e.message);
         setSnapshotKeys([]);
-      });
+      })
+      .finally(() => setSnapshotKeysLoading(false));
   }, []);
 
   useEffect(() => {
-    apiFetch<TableInfo[]>("/api/db/tables").then(setTables).catch(() => {});
+    setTablesLoading(true);
+    setTablesErr(null);
+    apiFetch<TableInfo[]>("/api/db/tables")
+      .then(setTables)
+      .catch((e: Error) => {
+        setTablesErr(e.message);
+        setTables([]);
+      })
+      .finally(() => setTablesLoading(false));
   }, []);
 
   useEffect(() => {
@@ -93,15 +112,38 @@ export default function Database() {
   useEffect(() => {
     if (!selected) return;
     setPage(0);
-    apiFetch<ColumnInfo[]>(`/api/db/tables/${selected}/columns`).then(setColumns).catch(() => {});
-    apiFetch<PreviewResponse>(`/api/db/tables/${selected}/preview?limit=${PAGE_SIZE}&offset=0`).then(setPreview).catch(() => {});
+    setSchemaOpen(false);
+    setColumnsLoading(true);
+    setColumnsErr(null);
+    setPreviewLoading(true);
+    setPreviewErr(null);
+    apiFetch<ColumnInfo[]>(`/api/db/tables/${selected}/columns`)
+      .then(setColumns)
+      .catch((e: Error) => {
+        setColumnsErr(e.message);
+        setColumns([]);
+      })
+      .finally(() => setColumnsLoading(false));
+    apiFetch<PreviewResponse>(`/api/db/tables/${selected}/preview?limit=${PAGE_SIZE}&offset=0`)
+      .then(setPreview)
+      .catch((e: Error) => {
+        setPreviewErr(e.message);
+        setPreview(null);
+      })
+      .finally(() => setPreviewLoading(false));
   }, [selected]);
 
   useEffect(() => {
     if (!selected) return;
+    setPreviewLoading(true);
+    setPreviewErr(null);
     apiFetch<PreviewResponse>(`/api/db/tables/${selected}/preview?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`)
       .then(setPreview)
-      .catch(() => {});
+      .catch((e: Error) => {
+        setPreviewErr(e.message);
+        setPreview(null);
+      })
+      .finally(() => setPreviewLoading(false));
   }, [page, selected]);
 
   const selectedSnapshot = useMemo(
@@ -145,7 +187,7 @@ export default function Database() {
     if (!selectedSnapshot) return;
     const token = confirmToken(selectedSnapshot);
     if (purgeConfirm.trim() !== token) {
-      setPurgeErr(`Type exactly "${token}" to confirm.`);
+      setPurgeErr(`請完整輸入 "${token}" 以確認。`);
       return;
     }
     setPurgeLoading(true);
@@ -156,7 +198,7 @@ export default function Database() {
       if (backupBeforePurge) {
         const data = await runExportDownload(selectedSnapshot);
         if (data.truncated) {
-          exportNote = `Export capped at ${data.limit ?? "?"} rows (truncated). Purge removed all rows for this race in the database.`;
+          exportNote = `備份匯出上限為 ${data.limit ?? "?"} 筆（已截斷）。`;
         }
       }
       const r = await apiFetch<{ deleted: number }>("/api/realtime/snapshots", {
@@ -170,7 +212,7 @@ export default function Database() {
       });
       const parts = [
         exportNote,
-        `Removed ${r.deleted.toLocaleString()} snapshot row(s).`,
+        `已清除 ${r.deleted.toLocaleString()} 筆快照資料。`,
       ].filter(Boolean);
       setPurgeMsg(parts.join(" "));
       await loadSnapshotKeys();
@@ -188,11 +230,10 @@ export default function Database() {
   const totalPages = preview ? Math.ceil(preview.total / PAGE_SIZE) : 0;
 
   return (
-    <div>
-      <h2 style={{ margin: "0 0 16px", fontSize: 20, fontWeight: 700 }}>Database Tables</h2>
-      <p className="muted" style={{ margin: "0 0 16px", fontSize: 13, maxWidth: "72ch" }}>
-        Select <code>hkjc_odds_snapshots</code> below to manage stored odds rows (race list, purge, JSON backup). The race
-        picker loads only for that table.
+    <div className="db-page">
+      <PageHeader title="Database Tables" subtitle="瀏覽資料表內容與維護快照資料。" />
+      <p className="muted page-intro">
+        先選擇資料表查看預覽與欄位；若需清理特定賽事快照，請切換至 <code>hkjc_odds_snapshots</code> 並使用下方維護區。
       </p>
 
       {purgeModalOpen && selectedSnapshot && (
@@ -200,41 +241,31 @@ export default function Database() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="purge-modal-title"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.75)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: 16,
-          }}
+          className="modal-backdrop"
           onClick={(e) => {
             if (e.target === e.currentTarget) closePurgeModal();
           }}
         >
           <div
-            className="card"
-            style={{ maxWidth: 440, width: "100%", margin: 0 }}
+            className="card modal-card db-purge-modal"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 id="purge-modal-title" className="card-title" style={{ marginTop: 0 }}>
-              Purge snapshots for this race?
+            <h3 id="purge-modal-title" className="card-title">
+              確認清除該場快照？
             </h3>
-            <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-              {formatSnapshotKeyLabel(selectedSnapshot)}. This cannot be undone unless you kept a backup.
+            <p className="muted db-purge-note">
+              {formatSnapshotKeyLabel(selectedSnapshot)}。此操作不可復原，建議先匯出備份。
             </p>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, cursor: "pointer" }}>
+            <label className="db-purge-check">
               <input
                 type="checkbox"
                 checked={backupBeforePurge}
                 onChange={(e) => setBackupBeforePurge(e.target.checked)}
                 disabled={purgeLoading}
               />
-              <span>Download JSON backup first</span>
+              <span>先下載 JSON 備份</span>
             </label>
-            <label className="field-label">Type {confirmToken(selectedSnapshot)} to confirm</label>
+            <label className="field-label">輸入 {confirmToken(selectedSnapshot)} 以確認</label>
             <input
               type="text"
               value={purgeConfirm}
@@ -242,70 +273,115 @@ export default function Database() {
               autoComplete="off"
               disabled={purgeLoading}
               placeholder={confirmToken(selectedSnapshot)}
-              style={{
-                width: "100%",
-                marginBottom: 12,
-                padding: "8px 10px",
-                borderRadius: 6,
-                border: "1px solid #334155",
-                background: "#0f172a",
-                color: "#e2e8f0",
-              }}
+              className="scraper-input db-purge-input"
             />
-            {purgeErr && <p className="error-text" style={{ marginBottom: 8 }}>{purgeErr}</p>}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" className="btn-ghost" onClick={closePurgeModal} disabled={purgeLoading}>
-                Cancel
+            {purgeErr && <p className="error-text db-purge-err">{purgeErr}</p>}
+            <div className="action-row db-purge-actions">
+              <button type="button" className="btn btn-ghost" onClick={closePurgeModal} disabled={purgeLoading}>
+                取消
               </button>
               <button
                 type="button"
-                className="btn-secondary"
-                style={{ borderColor: "rgba(248, 113, 113, 0.5)", color: "#fecaca" }}
+                className="btn btn-secondary btn-danger-outline"
                 onClick={() => void runPurge()}
                 disabled={purgeLoading}
               >
-                {purgeLoading ? "Working…" : "Confirm purge"}
+                {purgeLoading ? "處理中…" : "確認清除"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="table-list">
-        {tables.map((t) => (
-          <div
+      <section className="card db-table-card">
+        <h3 className="card-title">資料表選擇</h3>
+        {tablesErr && <p className="error-text">{tablesErr}</p>}
+        {tablesLoading ? <p className="muted status-line">載入資料表中…</p> : null}
+        <div className="table-list">
+          {tables.map((t) => (
+            <button
+              type="button"
             key={t.table_name}
             className={`table-list-item${selected === t.table_name ? " selected" : ""}`}
             onClick={() => setSelected(t.table_name)}
           >
             <div className="tname">{t.table_name}</div>
-            <div className="tcount">~{t.row_estimate.toLocaleString()} rows</div>
-          </div>
-        ))}
-      </div>
+            <div className="tcount">約 {t.row_estimate.toLocaleString()} 筆</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {selected && (
+        <section className="card db-preview-card">
+          <h3 className="card-title">
+            資料預覽：{selected}
+            {preview ? <span className="muted db-total">共 {preview.total.toLocaleString()} 筆</span> : null}
+          </h3>
+          {previewLoading && <p className="muted status-line">載入資料中…</p>}
+          {previewErr && <p className="error-text">{previewErr}</p>}
+          {preview && (
+            <>
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      {columnNames.map((col) => (
+                        <th key={col}>{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.rows.map((row, i) => (
+                      <tr key={i}>
+                        {columnNames.map((col) => (
+                          <td key={col}>{formatCell(row[col])}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {totalPages > 1 && (
+                <div className="pagination">
+                  <button className="btn btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                    上一頁
+                  </button>
+                  <span>
+                    第 {page + 1} / {totalPages} 頁
+                  </span>
+                  <button
+                    className="btn btn-ghost"
+                    disabled={page >= totalPages - 1}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    下一頁
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       {selected === "hkjc_odds_snapshots" && (
-        <div className="card" style={{ marginBottom: 20, borderColor: "rgba(248, 113, 113, 0.35)" }}>
-          <h3 className="card-title" style={{ marginTop: 0 }}>
-            HKJC odds snapshots
-          </h3>
-          <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
-            Remove all stored odds rows for one race to shrink <code>hkjc_odds_snapshots</code>. Purge and JSON export
-            require <code>ODDS_SNAPSHOT_PURGE_ENABLED=true</code> on the server. Optional backup downloads up to 50k rows
-            per race; if you hit the cap, run export again after purging in chunks or raise the server limit.
+        <section className="card db-snapshot-card">
+          <h3 className="card-title">快照維護</h3>
+          <p className="muted db-snapshot-intro">
+            以賽事為單位清理快照資料，可先匯出備份再執行刪除。
           </p>
+          {snapshotKeysLoading ? <p className="muted status-line">載入快照賽事清單中…</p> : null}
           {snapshotKeysErr && <p className="error-text">{snapshotKeysErr}</p>}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-            <div style={{ minWidth: 280, flex: "1 1 280px" }}>
-              <label className="field-label">Race (with data)</label>
+          <div className="action-row db-snapshot-actions">
+            <div className="db-snapshot-race-select">
+              <label className="field-label">有資料的賽事</label>
               <select
                 value={selectedSnapshotId}
                 onChange={(e) => setSelectedSnapshotId(e.target.value)}
                 disabled={!snapshotKeys.length}
-                style={{ width: "100%", maxWidth: 480 }}
               >
                 {!snapshotKeys.length ? (
-                  <option value="">No snapshot rows in database</option>
+                  <option value="">目前無可清理快照資料</option>
                 ) : (
                   snapshotKeys.map((k) => (
                     <option key={snapshotKeyId(k)} value={snapshotKeyId(k)}>
@@ -315,95 +391,64 @@ export default function Database() {
                 )}
               </select>
             </div>
-            <button type="button" className="btn-secondary" onClick={() => loadSnapshotKeys()}>
-              Refresh list
+            <button type="button" className="btn btn-secondary" onClick={() => loadSnapshotKeys()}>
+              更新清單
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ borderColor: "rgba(248, 113, 113, 0.5)", color: "#fecaca" }}
+              className="btn btn-secondary btn-danger-outline"
               onClick={openPurgeModal}
               disabled={!selectedSnapshot}
             >
-              Purge selected race…
+              清除所選賽事…
             </button>
           </div>
           {purgeMsg && !purgeModalOpen && (
-            <p style={{ marginTop: 12, fontSize: 13, color: "#86efac" }}>{purgeMsg}</p>
+            <p className="text-success-soft db-purge-msg">{purgeMsg}</p>
           )}
-        </div>
+        </section>
       )}
 
-      {selected && columns.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h3 className="card-title">Schema: {selected}</h3>
-          <div className="table-scroll" style={{ maxHeight: 260 }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Column</th>
-                  <th>Type</th>
-                  <th>Nullable</th>
-                  <th>Default</th>
-                </tr>
-              </thead>
-              <tbody>
-                {columns.map((c) => (
-                  <tr key={c.column_name}>
-                    <td style={{ fontWeight: 600 }}>{c.column_name}</td>
-                    <td>{c.data_type}</td>
-                    <td>{c.is_nullable}</td>
-                    <td style={{ color: "#64748b", fontSize: 12 }}>{c.column_default ?? "—"}</td>
+      {selected && (
+        <section className="card db-schema-card">
+          <button type="button" className="db-schema-toggle" onClick={() => setSchemaOpen((v) => !v)}>
+            <span>{schemaOpen ? "收合欄位結構" : "展開欄位結構"}</span>
+            <span className="db-schema-toggle-icon">{schemaOpen ? "▲" : "▼"}</span>
+          </button>
+          {columnsLoading && <p className="muted status-line">載入欄位結構中…</p>}
+          {columnsErr && <p className="error-text">{columnsErr}</p>}
+          {schemaOpen && columns.length > 0 && (
+            <div className="table-scroll db-schema-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>欄位</th>
+                    <th>型別</th>
+                    <th>可為空</th>
+                    <th>預設值</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {selected && preview && (
-        <div className="card">
-          <h3 className="card-title">
-            Data: {selected}
-            <span style={{ fontWeight: 400, fontSize: 13, color: "#94a3b8", marginLeft: 12 }}>
-              {preview.total.toLocaleString()} rows total
-            </span>
-          </h3>
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  {columnNames.map((col) => (
-                    <th key={col}>{col}</th>
+                </thead>
+                <tbody>
+                  {columns.map((c) => (
+                    <tr key={c.column_name}>
+                      <td className="db-col-name">{c.column_name}</td>
+                      <td>{c.data_type}</td>
+                      <td>{c.is_nullable}</td>
+                      <td className="text-faint-inline db-col-default">
+                        {c.column_default ?? "—"}
+                      </td>
+                    </tr>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.rows.map((row, i) => (
-                  <tr key={i}>
-                    {columnNames.map((col) => (
-                      <td key={col}>{formatCell(row[col])}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {totalPages > 1 && (
-            <div className="pagination">
-              <button className="btn btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Prev</button>
-              <span>Page {page + 1} / {totalPages}</span>
-              <button className="btn btn-ghost" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>Next</button>
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
+        </section>
       )}
 
       {!selected && (
-        <p style={{ color: "#64748b" }}>
-          Select a table above to browse its schema and data. For odds snapshot purge and export, select{" "}
-          <code>hkjc_odds_snapshots</code>.
+        <p className="muted">
+          請先選擇資料表以查看資料預覽與欄位結構。
         </p>
       )}
     </div>
