@@ -1,6 +1,6 @@
 # HKJC Dashboard — 專案與 UI 變更交接文件
 
-> 供後續 AI / 開發者快速接手。最後更新：2026-07-07。
+> 供後續 AI / 開發者快速接手。最後更新：2026-07-08。
 
 ---
 
@@ -14,7 +14,7 @@
 | 即時監控 | HKJC 賠率快照同步、走勢圖、QIN/QPL 矩陣 |
 | 智能分析 | 後端組裝 prompt → OpenAI 相容 API → 結構化分析並存 DB |
 | 資料維護 | Scraper 觸發歷史/馬匹抓取、Database 瀏覽與快照 purge |
-| 管理 | Session 登入、Settings 使用者管理、系統流程圖 |
+| 管理 | Keycloak OIDC 登入、Settings 系統流程圖 |
 
 **技術棧**
 
@@ -70,8 +70,11 @@ docker compose up -d postgres redis backend frontend caddy
 - `POSTGRES_PASSWORD`、`DATABASE_URL`（Docker 內用 `@postgres:5432`）
 - `SESSION_SECRET`
 - `KEYCLOAK_CLIENT_SECRET`、`KEYCLOAK_PUBLIC_BASE_URL`、`KEYCLOAK_INTERNAL_BASE_URL`
+- `AUTH_BROWSER_ORIGIN=http://localhost:5173`（**Vite dev 必填**；Docker+Caddy 可省略）
 - `SITE_ADDRESS`（本機常為 `localhost`）
 - 本機 Vite + HTTP 登入：`SESSION_COOKIE_SECURE=false`
+
+**Keycloak 疑難排解**：見 `docs/KEYCLOAK_LOGIN_ISSUE_SUMMARY.md`（redirect URI、登出、角色、密碼）。
 
 **常見 Docker 問題**
 
@@ -153,7 +156,7 @@ Backend 必須在 `:4000` 可達（Docker backend 或本機 `npm run dev:backend
 
 - **Login**：繁中表單、`btn btn-primary`、focus-visible
 - **Scraper**：狀態列 → 任務卡 → 同區日誌；移除 npm CLI 教學字串
-- **Settings**：導覽 → Users → 可摺疊 Mermaid 流程圖
+- **Settings**：可摺疊 Mermaid 流程圖；帳號由 Keycloak 管理（已移除本機 User Admin）
 - **Database**：表選擇 → 預覽 → 可摺疊 Schema → 快照維護；`modal-*` / `db-*` class
 - **智能分析**：情境卡 → 操作列 → 結果區；精簡 meta
 - **共用 CSS**：`page-intro`、`status-line`、`action-row`、`modal-backdrop` 等
@@ -165,7 +168,7 @@ Backend 必須在 `:4000` 可達（Docker backend 或本機 `npm run dev:backend
 | Favicon / Logo | `public/favicon.svg`、`AppLogo.tsx`、`site.webmanifest` | 深藍底 + 金色 H；側欄與登入頁共用 |
 | Sidebar 可完全隱藏 | `App.tsx`、`layout.css` | 桌面：`collapsed` → width 0；頂部 `☰`/`✕` 切換 |
 | Theme 只在側欄 | `App.tsx` | 已從 header 移除 `ThemeToggle` |
-| Docker backend port | `docker-compose.yml` | `4000:4000` 供 Vite proxy |
+| Docker backend port | `docker-compose.dev.yml` | 本機 dev 才映射 `4000:4000`、`8080:8080`；Linode 生產僅 Caddy 對外 |
 | Backend dev env | `apps/backend/package.json` | `--env-file=../../.env --env-file=.env.local` |
 | Database 筆數 / allowlist | `apps/backend/src/routes/db.js` | 修正統計為 0 的問題；加入 `hkjc_odds_snapshots` 等；清單與預覽 allowlist 一致；排除 `session` |
 
@@ -174,9 +177,9 @@ Backend 必須在 `:4000` 可達（Docker backend 或本機 `npm run dev:backend
 ## 5. 後端要點
 
 - 入口：`apps/backend/src/index.js`
-- 啟動時：`runMigrations()`、`bootstrapInitialAdmin()`
-- Auth：`POST /api/auth/login`（rate limit）、session cookie、`GET /api/auth/me`
-- 主要路由前綴：`/api/analytics`、`/api/realtime`、`/api/scraper`、`/api/db`、`/api/ai`、`/api/users`
+- 啟動時：`runMigrations()`
+- Auth（Keycloak OIDC）：`GET /api/auth/login`、`GET /api/auth/callback`、`POST /api/auth/logout`、`GET /api/auth/me`；實作見 `keycloak.js`、`authHandlers.js`
+- 主要路由前綴：`/api/analytics`、`/api/realtime`、`/api/scraper`、`/api/db`、`/api/ai`
 - Odds worker：`oddsSyncWorker.js`（interval 可經 Realtime API 調整）
 - Scraper UI 觸發：`POST /api/scraper/run`
 
@@ -239,7 +242,9 @@ Backend 必須在 `:4000` 可達（Docker backend 或本機 `npm run dev:backend
 |------|------|
 | `README.md` | 專案概覽、Scraper、schema |
 | `docs/DEPLOY_LINODE.md` | Linode / Caddy / DB 遷移 |
-| `docs/CYBER_SECURITY.md` | VPS 安全（若存在） |
+| `docs/POST_DEPLOY.md` | **部署後** Keycloak 設定與驗證（例：`lord-in-hk.ccwu.cc`） |
+| `docs/KEYCLOAK_LOGIN_ISSUE_SUMMARY.md` | Keycloak 登入／登出疑難排解 |
+| `docs/CYBER_SECURITY.md` | VPS 安全 |
 | `.cursor/skills/deploy-linode-hkjc/SKILL.md` | 部署技能 |
 | `.cursor/skills/professional-product-ui/SKILL.md` | UI 文案規範 |
 | `design_idea/DESIGN.md` | 早期灰階 pill 設計參考 |

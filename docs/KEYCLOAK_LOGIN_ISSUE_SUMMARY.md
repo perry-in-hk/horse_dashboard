@@ -1,89 +1,184 @@
-# Keycloak 登入問題總結
+# Keycloak 登入／登出問題總結
+
+> 最後更新：2026-07-08。完整登入與登出流程已在本地 Docker + Vite dev 驗證通過。
+
+---
 
 ## 問題現象
 
-- 前端顯示：`登入失敗：server responded with an error in the response body`
-- 後端 `GET /api/auth/me` 持續回傳 `401`
-- Keycloak 頁面曾出現：
-  - `Invalid parameter: redirect_uri`
-  - `Invalid username or password`
-- 一度出現無法連線：`Firefox can’t connect to localhost:8080`
+| 階段 | 現象 |
+|------|------|
+| 登入 callback | 前端：`登入失敗：server responded with an error in the response body` |
+| 登入 callback | 後端 `GET /api/auth/me` 持續 `401` |
+| Keycloak 登入頁 | `Invalid parameter: redirect_uri` |
+| Keycloak 登入頁 | `Invalid username or password`（密碼與 Keycloak 後台不一致） |
+| Keycloak 登出頁 | `Invalid redirect uri`（`post_logout_redirect_uri` 未白名單） |
+| 基礎設施 | `Firefox can't connect to localhost:8080`（Keycloak 未映射 port） |
 
 ---
 
 ## 主要根因（按影響排序）
 
-1. **Keycloak client secret 不一致（最關鍵）**
-   - 後端容器實際使用 `KEYCLOAK_CLIENT_SECRET=dev-secret`
-   - Keycloak client `hkjc-dashboard` 使用的是另一組 secret
-   - 導致 callback 交換 token 時回 `unauthorized_client` / `invalid_client_credentials`
+### 1. OIDC callback 的 `currentUrl` 與授權階段 `redirect_uri` 不一致（登入最關鍵）
 
-2. **redirect URI 在 dev proxy 場景被組成 `http://localhost:4000/...`**
-   - Keycloak client 未允許該 URI，回 `invalid_redirect_uri`
-   - 原因是從 `:4000` host 推導 callback，未正確回落到前端 origin
+- 授權請求使用 `AUTH_BROWSER_ORIGIN`（例如 `http://localhost:5173`）組出  
+  `redirect_uri=http://localhost:5173/api/auth/callback`
+- Token 交換卻用 `req.protocol://req.get("host")`（Vite proxy 後常為 `http://localhost:4000/...`）
+- Keycloak 回 `invalid_grant` / `Incorrect redirect_uri`
+- `openid-client` 對外顯示：`ResponseBodyError: server responded with an error in the response body`
+- 參考：[panva/openid-client#782](https://github.com/panva/openid-client/issues/782)
 
-3. **Keycloak 容器未對主機映射 `8080`**
-   - `localhost:8080` 無法連線，使用者無法進入 admin 或登入頁
+**修復**：`exchangeAuthorizationCode` 改用 `getBrowserOrigin(req)` 組 `currentUrl`（`apps/backend/src/keycloak.js`）。
 
-4. **Keycloak healthcheck 指令不相容**
-   - healthcheck 用 `wget`，但 image 內無 `wget`
-   - 造成容器實際已啟動但健康狀態不正確
+### 2. Post-logout redirect URI 未設定或格式錯誤（登出）
+
+- 登出導向 `http://localhost:5173/login`，但 client 的 `post.logout.redirect.uris` 為 `+`（僅沿用 login callback URI）
+- `/login` ≠ `/api/auth/callback`，Keycloak 拒絕
+- 多個 URI 必須以 `##` 分隔（**不是空格**）
+
+**修復**：在 `infra/docker/keycloak/realm-hkjc.json` 與執行中 client 設定：
+
+```
+http://localhost:5173/login##http://localhost/login##http://localhost:4000/login##https://localhost/login##https://*/login
+```
+
+### 3. Keycloak client secret 不一致
+
+- 後端 `KEYCLOAK_CLIENT_SECRET` 與 Keycloak client `hkjc-dashboard` secret 不同
+- Token 交換回 `unauthorized_client` / `invalid_client_credentials`
+
+### 4. Realm 角色未進入 ID token
+
+- `roles` scope 的 realm roles mapper 預設只寫 access token
+- 後端最初只讀 ID token claims → `Missing dashboard role`
+
+**修復**：啟用 mapper 的 `id.token.claim`；後端合併 ID token 與 access token 角色。
+
+### 5. `dashboard_users` upsert 與 partial unique index 不匹配
+
+- `ON CONFLICT (keycloak_sub)` 無法對應 partial index  
+  `WHERE keycloak_sub IS NOT NULL`
+- Postgres 錯誤：`there is no unique or exclusion constraint matching the ON CONFLICT specification`
+
+**修復**：改為 `ON CONFLICT (keycloak_sub) WHERE keycloak_sub IS NOT NULL`。
+
+### 6. 其他基礎設施問題
+
+- Keycloak 容器未映射 `8080:8080`
+- Healthcheck 使用 image 內不存在的 `wget`
+- Postgres 缺少 `keycloak` database
 
 ---
 
-## 已完成修復
+## 已完成修復（程式碼）
 
 ### 基礎設施 / Docker
 
-- 在 `docker-compose.yml` 新增 Keycloak 服務與依賴
-- 新增 `8080:8080` port mapping（可直接開 `http://localhost:8080`）
-- 調整 Keycloak healthcheck 為可執行命令（不依賴 `wget`）
-- 建立 Postgres `keycloak` database（解決 `database "keycloak" does not exist`）
+- `docker-compose.yml`：Keycloak 服務、`8080:8080`、健康檢查、realm import
+- `infra/docker/postgres/init-keycloak.sql`：建立 `keycloak` database
+- `infra/docker/Caddyfile`：`/auth*` → Keycloak
+- `infra/docker/keycloak/realm-hkjc.json`：client、redirect URI、post-logout URI
 
-### 後端 OIDC
+### 後端 OIDC（`apps/backend/src/keycloak.js`、`routes/authHandlers.js`）
 
-- 新增 `apps/backend/src/keycloak.js`，導入 `openid-client`
-- 實作 login / callback / logout OIDC 流程
-- 增加 dev 場景容錯（origin/host 推導 callback URI）
-- callback 登入後做 session regenerate，降低 session fixation 風險
+- Login / callback / logout OIDC 流程（`openid-client`）
+- Callback `currentUrl` 與 `redirect_uri` 一致
+- 角色從 ID token + access token 合併讀取
+- Callback 錯誤顯示 Keycloak 具體描述（非模糊英文）
+- Session regenerate（降低 session fixation 風險）
+- 移除本機密碼登入（`bootstrapAdmin.js`、`routes/users.js`）
 
-### Keycloak 與帳號
+### 前端
 
-- 建立新的 Keycloak admin：`admin2`
-- 建立 realm `hkjc` 測試使用者：`dashboard_admin`
-- 指派 `admin` realm role
-- 將 Keycloak client `hkjc-dashboard` secret 與 backend `.env` 同步
-
-### 設定檔
-
-- 補齊 `.env`：
-  - `KEYCLOAK_CLIENT_SECRET`
-  - `KEYCLOAK_ADMIN_PASSWORD`
-  - `KEYCLOAK_PUBLIC_BASE_URL`
-  - `KEYCLOAK_INTERNAL_BASE_URL`
-  - `AUTH_BROWSER_ORIGIN`
+- `Login.tsx`：導向 `/api/auth/login`（Keycloak OIDC）
+- `Settings.tsx`：帳號由 Keycloak 管理，移除本機 User Admin
 
 ---
 
-## 實際驗證結果
+## 環境變數（`.env`）
 
-- `docker compose ps`：核心服務可啟動（backend/keycloak/postgres/redis healthy）
-- `GET /api/auth/login`：可回 `302` 導向 Keycloak 授權端點
-- 先前 `500` 的主要錯誤（issuer mismatch、invalid client credentials）已逐步定位與修補
+| 變數 | 說明 |
+|------|------|
+| `KEYCLOAK_CLIENT_SECRET` | 與 Keycloak client `hkjc-dashboard` secret **必須一致** |
+| `KEYCLOAK_PUBLIC_BASE_URL` | 瀏覽器可達的 Keycloak URL，本機 dev 常為 `http://localhost:8080/auth` |
+| `KEYCLOAK_INTERNAL_BASE_URL` | 後端容器內 URL，通常 `http://keycloak:8080/auth` |
+| `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | Keycloak 管理員（`/auth/admin`） |
+| `AUTH_BROWSER_ORIGIN` | **Vite dev 必填**：`http://localhost:5173`；Docker+Caddy 可省略（用 `X-Forwarded-*`） |
+| `SESSION_SECRET` | Session cookie 簽章 |
+| `SESSION_COOKIE_SECURE` | 本機 HTTP dev 設 `false`；正式 HTTPS 設 `true` |
 
 ---
 
-## 仍需最終確認（使用者操作）
+## Keycloak client 檢查清單（`hkjc-dashboard`）
 
-1. 以 `dashboard_admin` 走完整登入流程（Dashboard -> Keycloak -> callback）
-2. 確認 `GET /api/auth/me` 回 `200`
-3. 確認角色映射（`admin`）可通過後端授權邏輯
+### Valid redirect URIs
+
+```
+http://localhost:5173/api/auth/callback
+http://localhost/api/auth/callback
+http://localhost:4000/api/auth/callback
+https://localhost/api/auth/callback
+https://*/api/auth/callback
+```
+
+### Valid post logout redirect URIs（`##` 分隔）
+
+```
+http://localhost:5173/login##http://localhost/login##http://localhost:4000/login##https://localhost/login##https://*/login
+```
+
+### 使用者與角色
+
+1. 在 realm `hkjc` 建立使用者（例如 `dashboard_admin`）
+2. 指派 realm role：`admin` 或 `user`（後端只接受這兩種）
+3. 密碼在 Keycloak 管理，**不是** Postgres 或 app 本機密碼
+
+重設密碼範例：
+
+```powershell
+docker exec hkjc-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth --realm master --user admin --password <KEYCLOAK_ADMIN_PASSWORD>
+
+docker exec hkjc-keycloak /opt/keycloak/bin/kcadm.sh set-password -r hkjc --username dashboard_admin --new-password "<新密碼>"
+```
+
+更新 post-logout URI（執行中環境，已 import 的 realm 不會自動套用 JSON 變更）：
+
+```powershell
+# 建立 patch JSON 後：
+docker cp infra/docker/keycloak/client-logout-patch.json hkjc-keycloak:/tmp/patch.json
+docker exec hkjc-keycloak /opt/keycloak/bin/kcadm.sh update clients/<CLIENT_UUID> -r hkjc -f /tmp/patch.json
+```
+
+`CLIENT_UUID` 可查：`kcadm.sh get clients -r hkjc -q clientId=hkjc-dashboard --fields id`
+
+---
+
+## 實際驗證結果（2026-07-08）
+
+- [x] `docker compose ps`：backend / keycloak / postgres / redis healthy
+- [x] `GET /api/auth/login` → `302` 至 Keycloak
+- [x] `dashboard_admin` 完整登入 → `/analysis`，`/api/auth/me` → `200`
+- [x] 角色映射 `admin` 通過後端授權
+- [x] 登出 → 回到 `http://localhost:5173/login`（無 Keycloak 錯誤頁）
 
 ---
 
 ## 防再發建議
 
-- 固定一份本地開發設定，避免環境變數被舊 shell 覆蓋（如 `dev-secret`）
-- 將 OIDC 相關 env 檢查做成啟動前檢核（startup validation）
-- 為 `/api/auth/callback` 增加更明確的錯誤分類日誌（redirect/client_secret/role 缺失）
-- 將 Keycloak client 設定（redirect URI、web origin、secret 管理）寫入部署 SOP
+1. **固定 dev `.env`**，避免舊 shell 覆蓋 `KEYCLOAK_CLIENT_SECRET`
+2. **Vite dev 必設** `AUTH_BROWSER_ORIGIN=http://localhost:5173`；**Linode 不要設**
+3. **Post-logout URI** 用 `##` 分隔；勿假設 `+` 涵蓋 `/login`
+4. **生產環境勿映射** host `4000` / `8080`（僅 Caddy `80`/`443` 對外；本機用 `docker-compose.dev.yml`）
+5. 部署 SOP 寫入：redirect URI、post-logout URI、secret 同步流程
+6. 考慮啟動前檢核 `KEYCLOAK_*` 與 discovery endpoint 可達性
+
+---
+
+## 相關文件
+
+| 文件 | 內容 |
+|------|------|
+| `docs/DEPLOY_LINODE.md` §5 C5 | 正式部署 Keycloak 設定 |
+| `docs/POST_DEPLOY.md` | Linode 部署後操作（`lord-in-hk.ccwu.cc` 範例） |
+| `docs/PROJECT_HANDOFF.md` | 專案交接與架構 |
+| `.env.example` | 環境變數範本 |
