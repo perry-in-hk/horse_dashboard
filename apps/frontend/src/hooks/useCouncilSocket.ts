@@ -22,10 +22,13 @@ function resolveWsBase(): string {
       const envHost = parsed.hostname;
       const pageIsLocal = pageHost === "localhost" || pageHost === "127.0.0.1";
       const envIsLocal = envHost === "localhost" || envHost === "127.0.0.1";
+      const pageIsHttps = window.location.protocol === "https:";
+      const envIsInsecureWs = parsed.protocol === "ws:" || parsed.protocol === "http:";
       // Guardrail A: remote page should not use localhost websocket target.
       // Guardrail B: local page should not use remote websocket target (cookie/domain mismatch).
       const isMismatchedLocality = (envIsLocal && !pageIsLocal) || (!envIsLocal && pageIsLocal);
-      if (!isMismatchedLocality) {
+      // Guardrail C: HTTPS pages must not use insecure ws/http targets.
+      if (!isMismatchedLocality && !(pageIsHttps && envIsInsecureWs)) {
         return envBase.replace(/\/$/, "");
       }
     } catch {
