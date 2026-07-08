@@ -1,6 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+/** Vite dev-server proxy target (server-side). In Docker Compose use http://backend:4000. */
+const devProxyTarget = (process.env.DEV_PROXY_TARGET ?? "http://localhost:4000").replace(/\/$/, "");
+const devProxyWsTarget = devProxyTarget.replace(/^http/i, "ws");
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -8,9 +12,9 @@ export default defineConfig({
     // Caddy forwards the browser Host (e.g. *.duckdns.org); Vite 8+ blocks unknown hosts by default.
     allowedHosts: true,
     proxy: {
-      "/api": { target: "http://localhost:4000", changeOrigin: true },
-      "/health": { target: "http://localhost:4000", changeOrigin: true },
-      "/ws": { target: "ws://localhost:4000", ws: true, changeOrigin: true },
+      "/api": { target: devProxyTarget, changeOrigin: true },
+      "/health": { target: devProxyTarget, changeOrigin: true },
+      "/ws": { target: devProxyWsTarget, ws: true, changeOrigin: true },
     },
   },
 });
