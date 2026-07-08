@@ -220,7 +220,11 @@ router.post("/analyze", async (req, res) => {
   const venue = venue_code.trim();
 
   let runners = await fetchRaceRunnersForRace(meeting_date, venue, race_no);
-  if (runners == null || runners.length === 0) {
+  runners = (runners ?? []).filter((r) => {
+    const no = Number.parseInt(String(r?.no ?? ""), 10);
+    return Number.isFinite(no) && no > 0 && !r?.is_standby;
+  });
+  if (runners.length === 0) {
     return res.status(404).json({ error: "Meeting or race not found, or no runners on the racecard." });
   }
 

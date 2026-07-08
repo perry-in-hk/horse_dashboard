@@ -129,9 +129,12 @@ interface SnapshotCountsResponse {
 }
 
 interface RacecardRunner {
-  no: number;
+  no: number | null;
   horse_name: string;
   horse_code: string;
+  status?: string;
+  is_standby?: boolean;
+  standby_no?: number | null;
 }
 
 interface RaceRunnersResponse {
@@ -394,6 +397,27 @@ function formatHorseCodeDisplay(code: string | undefined): string {
   return s ? s.toUpperCase() : "—";
 }
 
+function isRacecardBackup(r: RacecardRunner): boolean {
+  return Boolean(r.is_standby) || r.no == null || r.no <= 0;
+}
+
+/** Declared runners show betting horse no; standby (後備) never show as 0. */
+function formatRacecardHorseNo(r: RacecardRunner): string {
+  if (isRacecardBackup(r)) return "Back Up";
+  return String(r.no);
+}
+
+/** Declared by horse no first; Back Up (後備) always at the bottom. */
+function sortRacecardRunners(runners: RacecardRunner[]): RacecardRunner[] {
+  return [...runners].sort((a, b) => {
+    const aBackup = isRacecardBackup(a);
+    const bBackup = isRacecardBackup(b);
+    if (aBackup !== bBackup) return aBackup ? 1 : -1;
+    if (aBackup) return (a.standby_no ?? 99) - (b.standby_no ?? 99);
+    return (a.no ?? 0) - (b.no ?? 0);
+  });
+}
+
 function readInitialRealtimePrefs() {
   const saved = readRealtimeSessionPrefs();
   const chartPool = POOL_OPTIONS.includes(saved?.chartPool as PoolOption)
@@ -552,7 +576,7 @@ export default function Realtime() {
     });
     apiFetch<RaceRunnersResponse>(`/api/realtime/race-runners?${qs}`)
       .then((r) => {
-        setRaceRunners(r.runners ?? []);
+        setRaceRunners(sortRacecardRunners(r.runners ?? []));
       })
       .catch((e: Error) => {
         setRaceRunners([]);
@@ -1281,7 +1305,7 @@ export default function Realtime() {
             <table className="data-table" style={{ margin: 0 }}>
               <thead>
                 <tr>
-                  <th style={{ width: 48 }}>#</th>
+                  <th style={{ width: 72 }}>#</th>
                   <th>Horse</th>
                   <th style={{ width: 96 }} title="HKJC horse code, e.g. L360">
                     Horse code
@@ -1289,13 +1313,27 @@ export default function Realtime() {
                 </tr>
               </thead>
               <tbody>
-                {raceRunners.map((r) => (
-                  <tr key={`${r.no}-${r.horse_code}`}>
-                    <td>{r.no}</td>
+                {raceRunners.map((r) => {
+                  const backup = isRacecardBackup(r);
+                  return (
+                  <tr key={r.horse_code || `${r.no}-${r.horse_name}`}>
+                    <td
+                      className={backup ? "muted" : undefined}
+                      title={
+                        backup
+                          ? r.standby_no
+                            ? `後備馬（Standby ${r.standby_no}）`
+                            : "後備馬（Standby）"
+                          : `馬號 ${r.no}`
+                      }
+                    >
+                      {formatRacecardHorseNo(r)}
+                    </td>
                     <td>{r.horse_name}</td>
                     <td style={{ fontFamily: "ui-monospace, monospace" }}>{formatHorseCodeDisplay(r.horse_code)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

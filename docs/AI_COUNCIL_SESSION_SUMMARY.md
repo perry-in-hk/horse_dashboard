@@ -261,15 +261,28 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build bac
 
 ---
 
-## 12. 相關文件
+## 12. 馬號來源與後備馬（與 Realtime 共用）
+
+Council context 的 `runners` 來自 `fetchRaceRunnersForRace`（HKJC GraphQL racecard）：
+
+- **合法馬號** = 出賽馬的 `no`（與 WIN/PLA 組合字串一致）。
+- **後備馬（Standby）** 的 `no` 為空 → API 回傳 `no: null`、`is_standby: true`；載入 context 時**排除**，不會進入 `RunnersTable` / `validHorseNos`。
+- 近績：`horse_code` → 對照本場 `no` 後以 `#馬號 馬名` 呈現（見 `orchestrator.js` 的 `noByCode`）。
+
+Realtime 頁 Race field 對後備顯示 `Back Up`（底部），詳見 `docs/PROJECT_HANDOFF.md` §4.4。
+
+---
+
+## 13. 相關文件
 
 - `docs/AI_COUNCIL_ISSUES_AND_ARCHITECTURE.md` — 早期問題與架構
 - `docs/AGENT_HANDOFF_COUNCIL_STABILITY.md` — Agent 交接與驗證清單
+- `docs/PROJECT_HANDOFF.md` §4.4 — Racecard 馬號 / 後備馬
 - `.env.example` — Council / Odds sync 變數範例
 
 ---
 
-## 13. 後續可選優化
+## 14. 後續可選優化
 
 - 倒數與 interval 變更時，可選擇是否重置 `last_round_completed_at`（目前為即時套用新 gap 比較）。
 - Kelly / Lead 對 user 指令的 audit log（哪一輪採納／拒絕）。

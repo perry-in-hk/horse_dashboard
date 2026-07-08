@@ -94,7 +94,12 @@ export function buildUserPrompt(ctx, opts = {}) {
 
   const runnersBlock = [
     "### Declared runners (racecard)",
-    ...runners.map((r) => `- Horse ${r.no}: ${r.horse_name} (${r.horse_code})`),
+    ...runners
+      .filter((r) => {
+        const no = Number.parseInt(String(r?.no ?? ""), 10);
+        return Number.isFinite(no) && no > 0 && !r?.is_standby;
+      })
+      .map((r) => `- Horse ${r.no}: ${r.horse_name} (${r.horse_code})`),
   ].join("\n");
 
   let oddsBlock = "### Odds / market snapshot\n_No pool data supplied._\n";

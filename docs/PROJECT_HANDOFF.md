@@ -172,6 +172,27 @@ Backend 必須在 `:4000` 可達（Docker backend 或本機 `npm run dev:backend
 | Docker backend port | `docker-compose.dev.yml` | 本機 dev 映射 `4000:4000`；Linode 生產僅 Caddy 對外 |
 | Backend dev env | `apps/backend/package.json` | `--env-file=../../.env --env-file=.env.local` |
 | Database 筆數 / allowlist | `apps/backend/src/routes/db.js` | 修正統計為 0 的問題；加入 `hkjc_odds_snapshots` 等；清單與預覽 allowlist 一致；排除 `session` |
+| Racecard 馬號 / 後備馬 | `hkjcOddsClient.js`、`Realtime.tsx`、Council/`/api/ai` | 見下方 §4.4 |
+
+### 4.4 Racecard 馬號與後備馬（2026-07-08）
+
+**問題**：Realtime「Race field (HKJC racecard)」把後備馬（Standby）的空 `no` 正規化成 `0`，列表顯示 `#0`，易與正式出賽馬號混淆。
+
+**約定（與 AI Council 一致）**
+
+| 欄位 | 意義 |
+|------|------|
+| `no` | 正式出賽**下注馬號**（對應 WIN `combString`，例 `01`→`1`） |
+| `is_standby` / `standby_no` | 後備馬；`no` 為 `null`，**不可**當成馬號 `0` |
+| `horse_code` | HKJC 馬匹編號（例 `K056`）；AI 用此對應近績後再映回 `#馬號` |
+
+**行為**
+
+- Realtime Race field：出賽馬顯示數字馬號；後備顯示 **`Back Up`**，並**排在名單底部**。
+- AI Council / `/api/ai` analyze：context 只載入已出賽馬（`no > 0` 且非 standby），picks 驗證只接受本場合法馬號。
+- 核對方式：出賽馬 `no` 應與該場 WIN pool 的 `combString` 一致；後備馬不會出現在 WIN 盤。
+
+**主要檔案**：`apps/backend/src/lib/hkjcOddsClient.js`、`apps/frontend/src/pages/Realtime.tsx`、`apps/backend/src/lib/councilService.js`、`apps/backend/src/routes/ai.js`、`apps/backend/src/lib/ai/prompts.js`、`apps/backend/src/lib/ai/buildRaceContext.js`。
 
 ---
 

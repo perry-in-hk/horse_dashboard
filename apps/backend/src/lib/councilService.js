@@ -305,8 +305,17 @@ async function insertPicks(sessionId, picks) {
   return rows[0];
 }
 
+function declaredRunnersOnly(runners) {
+  return (Array.isArray(runners) ? runners : []).filter((r) => {
+    const no = Number.parseInt(String(r?.no ?? ""), 10);
+    return Number.isFinite(no) && no > 0 && !r?.is_standby;
+  });
+}
+
 async function loadContext(meetingDate, venueCode, raceNo, userMessages) {
-  const runners = await fetchRaceRunnersForRace(meetingDate, venueCode, raceNo);
+  const runnersAll = await fetchRaceRunnersForRace(meetingDate, venueCode, raceNo);
+  // Council / picks only use betting horse nos; exclude Standby (後備) which have empty no.
+  const runners = declaredRunnersOnly(runnersAll);
   if (!runners?.length) {
     const err = new Error("No runners found for race");
     err.status = 404;
