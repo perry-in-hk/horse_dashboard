@@ -297,6 +297,34 @@ export async function armIntervalForRace(body) {
   return armIntervalForRaces([body]);
 }
 
+/**
+ * Arm interval keeping any already-armed targets (merge + dedupe).
+ * @param {{ meeting_date: string; venue_code: string; race_no: number }[]} races
+ */
+export async function armIntervalForRacesMerged(races) {
+  const merged = dedupeRaceKeys([...getActiveIntervalTargets(), ...(races ?? [])]);
+  return armIntervalForRaces(merged);
+}
+
+/**
+ * Remove specific races from the interval targets; disarm entirely when none remain.
+ * @param {{ meeting_date: string; venue_code: string; race_no: number }[]} races
+ */
+export function removeIntervalTargets(races) {
+  if (legacyFullInterval()) {
+    return { ok: false, error: "legacy_full_interval" };
+  }
+  const removeKeys = new Set(
+    dedupeRaceKeys(races ?? []).map((r) => `${r.meeting_date}|${r.venue_code}|${r.race_no}`)
+  );
+  const remaining = getActiveIntervalTargets().filter(
+    (t) => !removeKeys.has(`${t.meeting_date}|${t.venue_code}|${t.race_no}`)
+  );
+  if (!remaining.length) return disarmInterval();
+  setActiveIntervalTargets(remaining);
+  return { ok: true, targets: remaining };
+}
+
 export function disarmInterval() {
   if (legacyFullInterval()) {
     return { ok: false, error: "legacy_full_interval" };

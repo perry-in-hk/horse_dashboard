@@ -482,7 +482,11 @@ The repo maps **`443:443`**, uses **`{$SITE_ADDRESS}`** in `infra/docker/Caddyfi
 
 ### 9.3 `VITE_WS_URL`
 
-The app **does not currently read `VITE_WS_URL` in code** (only documented in diagrams). If you add WebSockets later, from an **HTTPS** page use **`wss://`** and the **same host** as the site (and add a **`/ws`** route in Caddy to the backend if applicable). Until then, changing `VITE_WS_URL` is optional.
+The app now uses WebSocket for the AI Council room (`/ws/council`).
+
+- From an **HTTPS** page, use **`wss://`** with the same host as the site.
+- Ensure Caddy forwards `handle /ws/council* { reverse_proxy backend:4000 }`.
+- `VITE_WS_URL` can be left empty for same-origin (`/ws` via Vite proxy in local dev), or set explicitly to your public WS base.
 
 ### 9.4 Common HTTPS + Vite issues
 

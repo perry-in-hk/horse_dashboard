@@ -93,41 +93,44 @@ export const DOCKER_BUILD_RUN_DIAGRAM = `flowchart TB
   waitJobs --> browserNote
 `;
 
-/** 智能分析: assemble context → external AI → check → save → reload saved runs. */
+/** 智能分析（Council）: live room websocket + 3-stage council + picks persistence. */
 export const AI_RECOMMENDATION_FLOW_DIAGRAM = `flowchart TB
   subgraph userAi [You]
     userAiNode([You])
   end
-  subgraph webAi [智能分析 in the web app]
-    aiTab[Choose meeting and race; run analysis or open a saved run]
+  subgraph webAi [智能分析 Council in the web app]
+    aiTab[Choose meeting and race; start or stop council]
+    wsNode[Live room over websocket]
   end
   subgraph beAi [Backend]
-    buildCtx[Assemble context: saved form, odds history and momentum, optional live race card]
-    validate[Check the model reply matches the expected structure]
-    saveRun[Store a successful run for later]
-    loadSaved[List or load past runs]
+    gateDate[Date activation gate in HKT]
+    stage1[Stage 1: four agents first opinions]
+    stage2[Stage 2: anonymized peer ranking]
+    stage3[Stage 3: bookie synthesis]
+    saveRun[Persist session messages and picks]
   end
   subgraph storesAi [Database]
-    pgAi[(Stored snapshots, history, and saved analysis runs)]
+    pgAi[(Stored snapshots, council sessions, messages, picks)]
   end
   subgraph hkjcAi [HKJC]
-    gqlAi{{HKJC services when live detail is needed}}
+    gqlAi{{HKJC services for racecard and pools}}
   end
   subgraph llmOut [External AI provider]
-    openaiApi{{AI model you configure on the server}}
+    openaiApi{{OpenAI-compatible models for council}}
   end
   userAiNode -->|open the tab| aiTab
-  aiTab -->|signed-in request to run| buildCtx
-  buildCtx -->|read race and odds history| pgAi
-  buildCtx -->|fetch live card or pools when needed| gqlAi
-  buildCtx -->|send prompt| openaiApi
-  openaiApi -->|model answer| validate
-  validate -->|if valid| saveRun
-  saveRun -->|keep copy| pgAi
-  validate -->|show sections in the tab| aiTab
-  aiTab -->|browse history| loadSaved
-  loadSaved -->|read prior runs| pgAi
-  loadSaved -->|display| aiTab
+  aiTab -->|connect| wsNode
+  wsNode -->|start or chat proposal| gateDate
+  gateDate -->|load context from snapshots and history| pgAi
+  gateDate -->|fetch live card/pools when needed| gqlAi
+  gateDate -->|stage prompts| openaiApi
+  openaiApi --> stage1
+  stage1 --> stage2
+  stage2 --> stage3
+  stage3 --> saveRun
+  saveRun --> pgAi
+  saveRun -->|broadcast stage events and best picks| wsNode
+  wsNode -->|render chat and right-panel picks| aiTab
 `;
 
 export default function SystemWorkflowDiagrams() {
@@ -311,7 +314,7 @@ export default function SystemWorkflowDiagrams() {
           />
         </div>
         <p className="settings-diagram-caption muted">
-          系統會整合歷史與快照資料送入模型，並在回傳後驗證格式，再寫入可回看的分析紀錄。
+          Council 以三階段流程運行，透過 websocket 即時同步角色發言與右上角推薦組合。
         </p>
       </details>
 
