@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { buildCouncilExportMarkdown } from "../lib/councilExport.js";
+import { pool } from "../db.js";
 import {
   appendUserMessage,
   getCouncilStatus,
@@ -188,6 +189,30 @@ router.get("/sessions", async (req, res) => {
     raceNo: q.race_no,
     limit: q.limit,
   });
+  res.json({ items });
+});
+
+router.get("/meeting-history", async (_req, res) => {
+  const { rows } = await pool.query(
+    `SELECT
+       meeting_date::text AS meeting_date,
+       venue_code,
+       ARRAY_AGG(DISTINCT race_no ORDER BY race_no) AS race_numbers,
+       MAX(started_at_utc) AS latest_started_at_utc
+     FROM hkjc_council_sessions
+     GROUP BY meeting_date, venue_code
+     ORDER BY meeting_date DESC, latest_started_at_utc DESC
+     LIMIT 300`
+  );
+  const items = rows.map((r) => ({
+    date: r.meeting_date,
+    venueCode: r.venue_code,
+    races: (Array.isArray(r.race_numbers) ? r.race_numbers : []).map((no) => ({
+      no: String(no),
+      status: "HISTORICAL",
+    })),
+    source: "history",
+  }));
   res.json({ items });
 });
 
