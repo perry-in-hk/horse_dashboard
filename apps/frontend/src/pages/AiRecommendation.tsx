@@ -11,8 +11,11 @@ import {
   resolveRaceNo,
   writeSharedMeetingRace,
 } from "../lib/pageSessionPrefs.ts";
+import { getCountdownState, parsePostTime } from "../lib/racePostTime.ts";
 import { useCouncilSocket, type WsEnvelope } from "../hooks/useCouncilSocket.ts";
 import { useNowTick } from "../hooks/useNowTick.ts";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 interface ActiveRace {
   no?: string;
@@ -74,6 +77,32 @@ interface CouncilSessionRow {
 
 interface SessionListResponse {
   items: CouncilSessionRow[];
+}
+
+interface RaceResultPlacing {
+  horse_no?: number | null;
+  horse_name?: string | null;
+  horse_code?: string | null;
+  finish_position?: string | null;
+  jockey?: string | null;
+  trainer?: string | null;
+  draw?: number | null;
+  margin?: string | null;
+  finish_time?: string | null;
+  win_odds?: number | null;
+}
+
+interface RaceResultDividend {
+  pool?: string | null;
+  combination?: string | null;
+  payout_hkd?: number | null;
+}
+
+interface RaceResultsPayload {
+  status: "ready" | "pending" | "unavailable";
+  placings: RaceResultPlacing[];
+  dividends: RaceResultDividend[];
+  fetched_at?: string | null;
 }
 
 interface CouncilTypingState {
@@ -249,11 +278,15 @@ export default function AiRecommendation() {
     lastRoundCompletedAtMs: 0,
     roundMinGapMs: 30_000,
   });
+  const [raceResults, setRaceResults] = useState<RaceResultsPayload | null>(null);
+  const [raceResultsBusy, setRaceResultsBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const now = useNowTick(1000);
   const sessions404NotifiedRef = useRef(false);
   const chatListRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const prevMsgCountRef = useRef(0);
+  const raceResultsStatusRef = useRef<string | null>(null);
   const [unseenCount, setUnseenCount] = useState(0);
 
   const loadMeetings = useCallback(() => {
@@ -301,6 +334,13 @@ export default function AiRecommendation() {
     if (!meeting) return null;
     return (meeting.races ?? []).find((r) => parseInt(String(r.no), 10) === raceNo) ?? null;
   }, [meeting, raceNo]);
+
+  const raceEnded = useMemo(() => {
+    if (!meetingDate || !selectedRace) return false;
+    const startAt = parsePostTime(meetingDate, selectedRace.postTime);
+    const countdown = getCountdownState(now, startAt, selectedRace.status);
+    return countdown.label === "已結束";
+  }, [meetingDate, selectedRace, now]);
 
   useEffect(() => {
     if (!raceNumbers.length) return;
@@ -373,6 +413,9 @@ export default function AiRecommendation() {
     setSessionId(null);
     setPendingUserReply(false);
     setTypingState(null);
+    setRaceResults(null);
+    setRaceResultsBusy(false);
+    setExportBusy(false);
     setCadence({
       sessionRunning: false,
       runningRound: false,
@@ -383,6 +426,85 @@ export default function AiRecommendation() {
     setSessionsApiEnabled(true);
     sessions404NotifiedRef.current = false;
   }, [meetingDate, venueCode, raceNo]);
+
+  const loadRaceResults = useCallback(
+    (opts?: { refresh?: boolean }) => {
+      if (!raceKey) return Promise.resolve();
+      const statusParam = selectedRace?.status
+        ? `&race_status=${encodeURIComponent(String(selectedRace.status))}`
+        : "";
+      const refreshParam = opts?.refresh ? "&refresh=1" : "";
+      setRaceResultsBusy(true);
+      return apiFetch<RaceResultsPayload>(
+        `/api/realtime/race-results?meeting_date=${encodeURIComponent(raceKey.meeting_date)}&venue_code=${encodeURIComponent(
+          raceKey.venue_code
+        )}&race_no=${raceKey.race_no}${statusParam}${refreshParam}`
+      )
+        .then((r) => {
+          setRaceResults({
+            status: r.status ?? "pending",
+            placings: Array.isArray(r.placings) ? r.placings : [],
+            dividends: Array.isArray(r.dividends) ? r.dividends : [],
+            fetched_at: r.fetched_at ?? null,
+          });
+        })
+        .catch(() => {})
+        .finally(() => setRaceResultsBusy(false));
+    },
+    [raceKey, selectedRace?.status]
+  );
+
+  useEffect(() => {
+    if (!raceEnded || !raceKey) return;
+    loadRaceResults({ refresh: true }).catch(() => {});
+    const id = window.setInterval(() => {
+      const st = raceResultsStatusRef.current;
+      if (st === "ready" || st === "unavailable") return;
+      loadRaceResults().catch(() => {});
+    }, 12_000);
+    return () => window.clearInterval(id);
+  }, [raceEnded, raceKey, loadRaceResults]);
+
+  useEffect(() => {
+    raceResultsStatusRef.current = raceResults?.status ?? null;
+  }, [raceResults]);
+
+  const downloadTranscript = useCallback(async () => {
+    if (!raceKey) return;
+    setExportBusy(true);
+    setManualError(null);
+    try {
+      const qs = new URLSearchParams({
+        meeting_date: raceKey.meeting_date,
+        venue_code: raceKey.venue_code,
+        race_no: String(raceKey.race_no),
+      });
+      if (sessionId) qs.set("session_id", String(sessionId));
+      const res = await fetch(`${API_BASE}/api/council/export?${qs.toString()}`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const match = /filename="([^"]+)"/.exec(cd);
+      const filename =
+        match?.[1] ||
+        `council-${raceKey.meeting_date}-${raceKey.venue_code}-R${raceKey.race_no}.md`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : "匯出失敗");
+    } finally {
+      setExportBusy(false);
+    }
+  }, [raceKey, sessionId]);
 
   useEffect(() => {
     if (!meetingDate || !venueCode || !raceNo) return;
@@ -904,9 +1026,29 @@ export default function AiRecommendation() {
               <h3 className="ai-council-panel-title">議會聊天室</h3>
               <p className="ai-council-panel-subtitle muted">與分析師即時討論；提問可 @kelly</p>
             </div>
-            <span className="ai-council-panel-meta">
-              {messages.length > 0 ? `${messages.length} 則訊息` : "等待開場"}
-            </span>
+            <div className="ai-council-panel-header-actions">
+              <button
+                type="button"
+                className="btn btn-ghost ai-council-export-btn"
+                onClick={() => loadRaceResults({ refresh: true })}
+                disabled={!raceKey || raceResultsBusy}
+                title="向馬會抓取本場名次與派彩並寫入資料庫"
+              >
+                {raceResultsBusy ? "取得中…" : "取得正式賽果"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost ai-council-export-btn"
+                onClick={downloadTranscript}
+                disabled={!raceKey || exportBusy}
+                title="下載本場會議 Markdown（訊息、FINAL 共識、正式賽果）"
+              >
+                {exportBusy ? "匯出中…" : "下載 Markdown"}
+              </button>
+              <span className="ai-council-panel-meta">
+                {messages.length > 0 ? `${messages.length} 則訊息` : "等待開場"}
+              </span>
+            </div>
           </header>
 
           <div className="ai-council-chat-wrap">
@@ -1116,6 +1258,97 @@ export default function AiRecommendation() {
               <p className="muted">議會開始後，每輪總結會顯示於此。</p>
             </div>
           )}
+
+          {raceEnded || raceResultsBusy || raceResults != null ? (
+            <section className="ai-council-results-section" aria-label="正式賽果">
+              <header className="ai-council-results-header">
+                <h4 className="ai-council-picks-section-title">正式賽果</h4>
+                <div className="ai-council-results-header-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost ai-council-export-btn"
+                    onClick={() => loadRaceResults({ refresh: true })}
+                    disabled={!raceKey || raceResultsBusy}
+                    title="重新向馬會抓取本場名次與派彩"
+                  >
+                    {raceResultsBusy ? "取得中…" : "重新取得"}
+                  </button>
+                  <span className={`ai-picks-badge ${raceResults?.status === "ready" ? "final" : "interim"}`}>
+                    {raceResults?.status === "ready"
+                      ? "已入庫"
+                      : raceResults?.status === "unavailable"
+                        ? "無賽果"
+                        : raceResultsBusy
+                          ? "抓取中"
+                          : "待更新"}
+                  </span>
+                </div>
+              </header>
+              {!raceResults || (raceResults.status === "pending" && !raceResults.placings.length) ? (
+                <p className="ai-council-picks-empty muted">
+                  {raceResultsBusy
+                    ? "正在取得名次與派彩…"
+                    : raceEnded
+                      ? "完賽後會自動寫入；亦可按「取得正式賽果」手動抓取。"
+                      : "尚未入庫。完賽後或按上方「取得正式賽果」抓取。"}
+                </p>
+              ) : raceResults.status === "unavailable" ? (
+                <p className="ai-council-picks-empty muted">本場取消或無效，無正式名次。</p>
+              ) : (
+                <>
+                  {raceResults.placings.length ? (
+                    <div className="ai-council-results-table-wrap">
+                      <table className="ai-council-results-table">
+                        <thead>
+                          <tr>
+                            <th>名次</th>
+                            <th>馬號</th>
+                            <th>馬名</th>
+                            <th>賠率</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {raceResults.placings.map((p, i) => (
+                            <tr key={`${p.horse_no ?? "x"}-${i}`}>
+                              <td>{p.finish_position ?? "—"}</td>
+                              <td>{p.horse_no ?? "—"}</td>
+                              <td>{p.horse_name ?? "—"}</td>
+                              <td>{p.win_odds ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                  {raceResults.dividends.length ? (
+                    <div className="ai-council-dividends">
+                      <h5 className="ai-council-dividends-title">派彩</h5>
+                      <ul className="ai-picks-list">
+                        {raceResults.dividends.slice(0, 24).map((d, i) => (
+                          <li key={`${d.pool}-${d.combination}-${i}`} className="ai-picks-row">
+                            <div className="ai-picks-row-main">
+                              <span className="ai-picks-product">{d.pool}</span>
+                              <span className="ai-picks-combo">{d.combination}</span>
+                              <span className="ai-picks-odds">
+                                {d.payout_hkd != null ? `$ ${d.payout_hkd}` : "—"}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      {raceResults.dividends.length > 24 ? (
+                        <p className="muted ai-council-dividends-more">
+                          另有 {raceResults.dividends.length - 24} 筆派彩，見 Markdown 匯出。
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : raceResults.status === "pending" ? (
+                    <p className="ai-council-picks-empty muted">名次已到，派彩尚在更新…</p>
+                  ) : null}
+                </>
+              )}
+            </section>
+          ) : null}
         </aside>
         {meetingsErr && <p className="error-text ai-rec-error-line ai-council-layout-full">{meetingsErr}</p>}
         {manualError && <p className="error-text ai-rec-error-line ai-council-layout-full">{manualError}</p>}

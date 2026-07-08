@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { buildCouncilExportMarkdown } from "../lib/councilExport.js";
 import {
   appendUserMessage,
   getCouncilStatus,
@@ -188,6 +189,30 @@ router.get("/sessions", async (req, res) => {
     limit: q.limit,
   });
   res.json({ items });
+});
+
+router.get("/export", async (req, res) => {
+  const parsed = raceKey
+    .extend({
+      session_id: z.coerce.number().int().positive().optional(),
+    })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+  const q = parsed.data;
+  try {
+    const { markdown, filename } = await buildCouncilExportMarkdown({
+      meetingDate: q.meeting_date,
+      venueCode: q.venue_code,
+      raceNo: q.race_no,
+      sessionId: q.session_id ?? null,
+    });
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(markdown);
+  } catch (e) {
+    console.error("[council/export]", e);
+    res.status(500).json({ error: e?.message ?? "Export failed" });
+  }
 });
 
 export default router;

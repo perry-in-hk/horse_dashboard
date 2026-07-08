@@ -208,6 +208,89 @@
   white-space: nowrap;
 }
 
+.ai-council-panel-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ai-council-export-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.ai-council-results-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-strong);
+}
+
+.ai-council-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ai-council-results-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ai-council-results-header .ai-council-picks-section-title {
+  margin: 0;
+}
+
+.ai-council-results-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+}
+
+.ai-council-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ai-council-results-table th,
+.ai-council-results-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-medium);
+  white-space: nowrap;
+}
+
+.ai-council-results-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-overlay);
+}
+
+.ai-council-results-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ai-council-dividends-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ai-council-dividends-more {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
 .ai-council-chat-panel {
   grid-column: 1;
   display: flex;
