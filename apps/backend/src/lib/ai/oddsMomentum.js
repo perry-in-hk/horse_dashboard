@@ -5,6 +5,25 @@
 
 const TOP_N = 8;
 
+const HKT_TIME = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Hong_Kong",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+function fmtHkt(iso) {
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? `${HKT_TIME.format(d)} HKT` : String(iso);
+}
+
+function ageMinutes(iso) {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.round((Date.now() - t) / 60_000));
+}
+
 function normalizePoolsPayload(raw) {
   if (raw == null) return [];
   let v = raw;
@@ -161,10 +180,11 @@ export async function buildOddsMomentumPromptBlock(pool, key) {
   const lines = [
     "### Odds momentum (server-computed, 短時間賠率急跌偵測)",
     `Window: last ~${windowMin} minutes, up to ${maxRows} newest snapshots, compared oldest→newest in time.`,
-    `Snapshot time range: ${tFirst} → ${tLast} (${rows.length} rows).`,
+    `Snapshot time range: ${fmtHkt(tFirst)} → ${fmtHkt(tLast)} (${rows.length} rows). All times below are HKT (UTC+8).`,
     spacingHint,
     `Rule: for each selection (WIN=horse no, PLA=horse no, QIN/QPL=comb), take the **largest % drop** across any adjacent snapshot pair in the window.`,
     `Flag if dropPct >= ${minPct}% OR dropAbs >= ${absMin} (same selection must show odds falling).`,
+    "IMPORTANT: each drop is annotated with how many minutes ago it happened. Drops older than ~3 minutes are OLD NEWS — they have already been discussed and must NOT be re-reported as new signals.",
     "",
     "Notable drops (candidates for “大注” interpretation — not proof):",
   ];
@@ -175,8 +195,10 @@ export async function buildOddsMomentumPromptBlock(pool, key) {
       lines.push(`  - (none above threshold in this window)`);
     } else {
       for (const x of arr) {
+        const age = ageMinutes(x.t1);
+        const ageNote = age == null ? "" : age <= 3 ? ` [NEW, ~${age} min ago]` : ` [OLD, ~${age} min ago — do not re-report]`;
         lines.push(
-          `  - key ${x.key}: ${x.prevOdds.toFixed(2)} → ${x.nextOdds.toFixed(2)} (−${x.dropPct.toFixed(1)}%, abs −${x.dropAbs.toFixed(2)}) between ${x.t0} and ${x.t1}`
+          `  - key ${x.key}: ${x.prevOdds.toFixed(2)} → ${x.nextOdds.toFixed(2)} (−${x.dropPct.toFixed(1)}%, abs −${x.dropAbs.toFixed(2)}) between ${fmtHkt(x.t0)} and ${fmtHkt(x.t1)}${ageNote}`
         );
       }
     }

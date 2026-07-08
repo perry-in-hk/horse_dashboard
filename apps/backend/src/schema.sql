@@ -314,6 +314,53 @@ CREATE TABLE IF NOT EXISTS hkjc_ai_analyses (
 CREATE INDEX IF NOT EXISTS idx_hkjc_ai_analyses_race_time
   ON hkjc_ai_analyses (meeting_date, venue_code, race_no, created_at DESC);
 
+-- Council sessions/messages/picks (LLM Council live room)
+CREATE TABLE IF NOT EXISTS hkjc_council_sessions (
+  id BIGSERIAL PRIMARY KEY,
+  meeting_date DATE NOT NULL,
+  venue_code TEXT NOT NULL,
+  race_no INT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  trigger TEXT NOT NULL DEFAULT 'manual',
+  started_by_user_id INT,
+  started_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at_hkt TEXT NOT NULL DEFAULT '',
+  stopped_at_utc TIMESTAMPTZ,
+  stopped_at_hkt TEXT,
+  stop_reason TEXT,
+  meta_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_council_sessions_race
+  ON hkjc_council_sessions (meeting_date, venue_code, race_no, started_at_utc DESC);
+
+CREATE TABLE IF NOT EXISTS hkjc_council_messages (
+  id BIGSERIAL PRIMARY KEY,
+  session_id BIGINT NOT NULL REFERENCES hkjc_council_sessions(id) ON DELETE CASCADE,
+  seq INT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  picks_version INT,
+  meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (session_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_council_messages_session_seq
+  ON hkjc_council_messages (session_id, seq);
+
+CREATE TABLE IF NOT EXISTS hkjc_council_picks (
+  id BIGSERIAL PRIMARY KEY,
+  session_id BIGINT NOT NULL REFERENCES hkjc_council_sessions(id) ON DELETE CASCADE,
+  version INT NOT NULL,
+  picks_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (session_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_council_picks_session_version
+  ON hkjc_council_picks (session_id, version DESC);
+
 -- Dashboard identities (session rows are created by connect-pg-simple when createTableIfMissing runs)
 CREATE TABLE IF NOT EXISTS dashboard_users (
   id SERIAL PRIMARY KEY,

@@ -5,8 +5,18 @@ import { echartsRealtimeLineChartBase, type ThemeTokens } from "../themeTokens";
 import { useTheme } from "../theme/ThemeContext.tsx";
 import PairOddsMatrix, { buildPairCellMap, type PairPoolType } from "../components/PairOddsMatrix.tsx";
 import PageHeader from "../components/PageHeader.tsx";
+import RaceTimeContext from "../components/RaceTimeContext.tsx";
 import { normalizePairKeyFromComb } from "../lib/pairComb.ts";
+import {
+  readRealtimeSessionPrefs,
+  readSharedMeetingRace,
+  resolveMeetingIndex,
+  resolveRaceNo,
+  writeRealtimeSessionPrefs,
+  writeSharedMeetingRace,
+} from "../lib/pageSessionPrefs.ts";
 import { apiFetch } from "../api/client.ts";
+import OddsSyncChips from "../components/OddsSyncChips.tsx";
 
 const LS_REFRESH_KEY = "hkjc_realtime_refresh_ms";
 const REFRESH_CHOICES_MS = [5000, 10000, 15000, 30000, 60000] as const;
@@ -384,18 +394,46 @@ function formatHorseCodeDisplay(code: string | undefined): string {
   return s ? s.toUpperCase() : "—";
 }
 
+function readInitialRealtimePrefs() {
+  const saved = readRealtimeSessionPrefs();
+  const chartPool = POOL_OPTIONS.includes(saved?.chartPool as PoolOption)
+    ? (saved!.chartPool as PoolOption)
+    : "WIN";
+  const tablePool = POOL_OPTIONS.includes(saved?.tablePool as PoolOption)
+    ? (saved!.tablePool as PoolOption)
+    : chartPool;
+  const timelineHours =
+    typeof saved?.timelineHours === "number" &&
+    (TIMELINE_HOURS_CHOICES as readonly number[]).includes(saved.timelineHours)
+      ? saved.timelineHours
+      : readTimelineHours();
+  const refreshMs =
+    typeof saved?.refreshMs === "number" && (REFRESH_CHOICES_MS as readonly number[]).includes(saved.refreshMs)
+      ? saved.refreshMs
+      : readRefreshMs();
+  return {
+    chartPool,
+    tablePool,
+    lockPools: saved?.lockPools !== false,
+    timelineHours,
+    refreshMs,
+  };
+}
+
 export default function Realtime() {
   const { tokens: theme } = useTheme();
   const navigate = useNavigate();
+  const initialRtPrefs = useMemo(() => readInitialRealtimePrefs(), []);
+  const initialMeetingRace = useMemo(() => readSharedMeetingRace(), []);
   const [meetings, setMeetings] = useState<ActiveMeeting[]>([]);
   const [meetingsErr, setMeetingsErr] = useState<string | null>(null);
   const [meetingIdx, setMeetingIdx] = useState(0);
-  const [raceNo, setRaceNo] = useState(1);
-  const [chartPool, setChartPool] = useState<PoolOption>("WIN");
-  const [tablePool, setTablePool] = useState<PoolOption>("WIN");
-  const [lockPools, setLockPools] = useState(true);
-  const [refreshMs, setRefreshMs] = useState(() => readRefreshMs());
-  const [timelineHours, setTimelineHours] = useState(() => readTimelineHours());
+  const [raceNo, setRaceNo] = useState(initialMeetingRace?.raceNo ?? 1);
+  const [chartPool, setChartPool] = useState<PoolOption>(initialRtPrefs.chartPool);
+  const [tablePool, setTablePool] = useState<PoolOption>(initialRtPrefs.tablePool);
+  const [lockPools, setLockPools] = useState(initialRtPrefs.lockPools);
+  const [refreshMs, setRefreshMs] = useState(initialRtPrefs.refreshMs);
+  const [timelineHours, setTimelineHours] = useState(initialRtPrefs.timelineHours);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
@@ -431,6 +469,17 @@ export default function Realtime() {
       .then((r) => {
         const list = r.meetings ?? [];
         setMeetings(list);
+        const saved = readSharedMeetingRace();
+        if (list.length) {
+          setMeetingIdx(resolveMeetingIndex(list, saved));
+          if (saved?.raceNo) {
+            const m = list[resolveMeetingIndex(list, saved)];
+            const nums = (m?.races ?? [])
+              .map((race) => parseInt(String(race.no), 10))
+              .filter((n) => Number.isFinite(n));
+            setRaceNo(resolveRaceNo([...new Set(nums)].sort((a, b) => a - b), saved.raceNo));
+          }
+        }
         return list;
       })
       .catch((e: Error) => {
@@ -575,6 +624,21 @@ export default function Realtime() {
   useEffect(() => {
     localStorage.setItem(LS_TIMELINE_HOURS_KEY, String(timelineHours));
   }, [timelineHours]);
+
+  useEffect(() => {
+    if (!meetingDate || !venueCode || !raceNo) return;
+    writeSharedMeetingRace({ meetingDate, venueCode, raceNo });
+  }, [meetingDate, venueCode, raceNo]);
+
+  useEffect(() => {
+    writeRealtimeSessionPrefs({
+      chartPool,
+      tablePool,
+      lockPools,
+      timelineHours,
+      refreshMs,
+    });
+  }, [chartPool, tablePool, lockPools, timelineHours, refreshMs]);
 
   useEffect(() => {
     const races = meeting?.races ?? [];
@@ -735,6 +799,11 @@ export default function Realtime() {
     return [...new Set(nums)].sort((a, b) => a - b);
   }, [meeting]);
 
+  const selectedRace = useMemo(() => {
+    if (!meeting) return null;
+    return (meeting.races ?? []).find((r) => parseInt(String(r.no), 10) === raceNo) ?? null;
+  }, [meeting, raceNo]);
+
   const intervalMeetingKey = useMemo(() => {
     const m = meetings[meetingIdx];
     if (!m?.date || m.venueCode == null) return "";
@@ -847,11 +916,18 @@ export default function Realtime() {
           <p className="realtime-context-line">
             {meetingDate || "—"} · {venueCode || "—"} · Race {raceNo}
           </p>
+          {meetingDate ? <RaceTimeContext meetingDate={meetingDate} race={selectedRace} /> : null}
           <p className="muted realtime-context-meta" style={{ margin: 0 }}>
             快照數：<strong>{history.length}</strong>
             {latestSnapshotAt ? <> · 最新：{new Date(latestSnapshotAt).toLocaleString()}</> : null}
             {loading ? <> · 更新中…</> : null}
           </p>
+          {status && meetingDate && venueCode ? (
+            <OddsSyncChips
+              status={status}
+              race={{ meeting_date: meetingDate, venue_code: venueCode, race_no: raceNo }}
+            />
+          ) : null}
         </div>
       </div>
       {status && (
@@ -861,19 +937,7 @@ export default function Realtime() {
             {status.legacyFullInterval && (
               <span className="text-accent"> · 全場掃描模式</span>
             )}
-            {status.lastSync?.at && (
-              <>
-                {" "}
-                · 最近 {new Date(status.lastSync.at).toLocaleString()}
-                {status.lastSync.result && (
-                  <>
-                    {" "}
-                    （新增 {status.lastSync.result.inserted ?? 0}、檢查 {status.lastSync.result.racesChecked ?? 0} 場）
-                  </>
-                )}
-                {status.lastSync.error && <span className="text-danger"> · {status.lastSync.error}</span>}
-              </>
-            )}
+            {status.lastSync?.error && <span className="text-danger"> · {status.lastSync.error}</span>}
             {status.currentSync?.kind === "full" && (
               <span className="text-info">
                 {" "}

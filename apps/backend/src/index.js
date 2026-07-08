@@ -16,7 +16,10 @@ import dbRouter from "./routes/db.js";
 import scraperRouter from "./routes/scraper.js";
 import realtimeRouter from "./routes/realtime.js";
 import aiRouter from "./routes/ai.js";
+import councilRouter from "./routes/council.js";
 import { startOddsSyncWorker } from "./oddsSyncWorker.js";
+import { attachCouncilWs } from "./councilWs.js";
+import { startCouncilScheduler } from "./councilScheduler.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -54,6 +57,7 @@ protectedApi.use("/db", dbRouter);
 protectedApi.use("/scraper", scraperRouter);
 protectedApi.use("/realtime", realtimeRouter);
 protectedApi.use("/ai", aiRouter);
+protectedApi.use("/council", councilRouter);
 
 app.use("/api", protectedApi);
 
@@ -75,8 +79,13 @@ const port = Number(process.env.PORT ?? 4000);
 
   const server = app.listen(port, () => {
     startOddsSyncWorker();
+    startCouncilScheduler();
+    console.log(
+      `[startup] council routes enabled at /api/council/* | mode=${String(process.env.COUNCIL_MODE ?? "chatroom")}`
+    );
     console.log(`Backend listening on ${port}`);
   });
+  attachCouncilWs({ server, sessionMiddleware });
 
   server.on("error", (err) => {
     console.error(err);

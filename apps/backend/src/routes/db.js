@@ -12,6 +12,9 @@ const TABLE_ALLOWLIST = new Set([
   "hkjc_merged_race_data",
   "hkjc_ai_analyses",
   "hkjc_odds_snapshots",
+  "hkjc_council_sessions",
+  "hkjc_council_messages",
+  "hkjc_council_picks",
   "dashboard_users",
 ]);
 
