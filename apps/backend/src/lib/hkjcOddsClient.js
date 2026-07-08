@@ -25,20 +25,37 @@ export async function fetchMeetingWithRunners(date, venueCode) {
 
 /**
  * Map a GraphQL racecard runner (see horseQuery runners fields) to API shape.
+ * Declared runners use `no` (saddle / betting horse number, matches WIN combString).
+ * Standby (後備) runners have empty `no` and a `standbyNo` — never coerce that to 0.
  * @param {unknown} ru
- * @returns {{ no: number, horse_name: string, horse_code: string }}
+ * @returns {{
+ *   no: number | null,
+ *   horse_name: string,
+ *   horse_code: string,
+ *   status: string,
+ *   is_standby: boolean,
+ *   standby_no: number | null
+ * }}
  */
 export function normalizeRacecardRunner(ru) {
-  const no = parseInt(String(ru?.no ?? "").trim(), 10);
+  const parsedNo = parseInt(String(ru?.no ?? "").trim(), 10);
+  const no = Number.isFinite(parsedNo) && parsedNo > 0 ? parsedNo : null;
+  const parsedStandby = parseInt(String(ru?.standbyNo ?? "").trim(), 10);
+  const standby_no = Number.isFinite(parsedStandby) && parsedStandby > 0 ? parsedStandby : null;
+  const status = String(ru?.status ?? "").trim();
+  const is_standby = status.toUpperCase() === "STANDBY" || no == null;
   const code = String(ru?.horse?.code ?? "").trim().toUpperCase();
   const name =
     String(ru?.name_en ?? ru?.name_ch ?? "")
       .trim()
       .replace(/\s+/g, " ") || code || "";
   return {
-    no: Number.isFinite(no) ? no : 0,
+    no,
     horse_name: name || "?",
     horse_code: code,
+    status,
+    is_standby,
+    standby_no,
   };
 }
 
@@ -47,7 +64,14 @@ export function normalizeRacecardRunner(ru) {
  * @param {string} meetingDate YYYY-MM-DD
  * @param {string} venueCode
  * @param {number} raceNo
- * @returns {Promise<{ no: number, horse_name: string, horse_code: string }[] | null>}
+ * @returns {Promise<{
+ *   no: number | null,
+ *   horse_name: string,
+ *   horse_code: string,
+ *   status: string,
+ *   is_standby: boolean,
+ *   standby_no: number | null
+ * }[] | null>}
  *   `null` if meeting or race is missing.
  */
 export async function fetchRaceRunnersForRace(meetingDate, venueCode, raceNo) {
@@ -58,7 +82,11 @@ export async function fetchRaceRunnersForRace(meetingDate, venueCode, raceNo) {
   const runners = (race.runners ?? [])
     .map(normalizeRacecardRunner)
     .filter((r) => r.horse_code);
-  runners.sort((a, b) => a.no - b.no);
+  runners.sort((a, b) => {
+    if (a.is_standby !== b.is_standby) return a.is_standby ? 1 : -1;
+    if (a.is_standby) return (a.standby_no ?? 99) - (b.standby_no ?? 99);
+    return (a.no ?? 0) - (b.no ?? 0);
+  });
   return runners;
 }
 
@@ -95,11 +123,15 @@ export async function mergePayloadWithRunnerFallback(pmPools, date, venueCode, r
 
   if (oddsTypes.includes("WIN")) {
     const winNodes = race.runners
-      .map((ru) => ({
-        combString: String(ru.no ?? "").trim() || "?",
-        oddsValue: ru.winOdds,
-      }))
-      .filter((n) => n.oddsValue != null && n.oddsValue !== "");
+      .map((ru) => {
+        const no = parseInt(String(ru?.no ?? "").trim(), 10);
+        if (!Number.isFinite(no) || no <= 0) return null;
+        return {
+          combString: String(no),
+          oddsValue: ru.winOdds,
+        };
+      })
+      .filter((n) => n && n.oddsValue != null && n.oddsValue !== "");
 
     if (winNodes.length > 0) {
       const idx = pools.findIndex((p) => p.oddsType === "WIN");

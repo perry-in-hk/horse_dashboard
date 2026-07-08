@@ -85,7 +85,8 @@ function winOddsFromRacecardRace(race) {
   const pla = {};
   for (const ru of race?.runners ?? []) {
     const no = parseInt(String(ru?.no ?? "").trim(), 10);
-    if (!Number.isFinite(no)) continue;
+    // Standby / empty no must not become odds keys (would appear as "0" / NaN).
+    if (!Number.isFinite(no) || no <= 0) continue;
     const key = String(no);
     const w = parseOddsNum(ru?.winOdds);
     if (w != null) win[key] = w;
