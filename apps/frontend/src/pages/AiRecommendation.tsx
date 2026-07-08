@@ -121,6 +121,14 @@ function speakerDisplayName(code: string) {
   return agentStyle(code).name;
 }
 
+function dispositionLabelZh(raw: string): string | null {
+  const key = raw.trim().toLowerCase();
+  if (key === "accepted") return "已採納";
+  if (key === "parked") return "待定";
+  if (key === "rejected") return "已駁回";
+  return null;
+}
+
 interface CouncilCadence {
   sessionRunning: boolean;
   runningRound: boolean;
@@ -165,13 +173,12 @@ const ROUND_GAP_PRESETS = [15, 30, 45, 60, 90, 120];
 
 function formatNextRoundHint(cadence: CouncilCadence, nowMs: number, isTyping: boolean): string | null {
   if (!cadence.sessionRunning || cadence.finalized) return null;
-  const gapSec = Math.max(1, Math.round(cadence.roundMinGapMs / 1000));
-  if (cadence.runningRound || isTyping) return `本輪進行中…（間隔 ${gapSec} 秒）`;
+  if (cadence.runningRound || isTyping) return "本輪進行中";
   if (cadence.lastRoundCompletedAtMs <= 0) return null;
   const remainingMs = cadence.lastRoundCompletedAtMs + cadence.roundMinGapMs - nowMs;
-  if (remainingMs <= 0) return `下一輪即將開始（間隔 ${gapSec} 秒）`;
+  if (remainingMs <= 0) return "下一輪即將開始";
   const secs = Math.ceil(remainingMs / 1000);
-  return `下一輪約 ${secs} 秒後開始（間隔 ${gapSec} 秒）`;
+  return `約 ${secs} 秒後下一輪`;
 }
 
 function formatSessionStateText(status: Record<string, unknown>) {
@@ -234,6 +241,7 @@ export default function AiRecommendation() {
   const [roundGapBusy, setRoundGapBusy] = useState(false);
   const [roundGapMin, setRoundGapMin] = useState(15);
   const [roundGapMax, setRoundGapMax] = useState(600);
+  const [roundGapEditingCustom, setRoundGapEditingCustom] = useState(false);
   const [cadence, setCadence] = useState<CouncilCadence>({
     sessionRunning: false,
     runningRound: false,
@@ -404,6 +412,7 @@ export default function AiRecommendation() {
         setRoundGapDraft(String(gap.gapSeconds));
         setRoundGapMin(gap.minSeconds);
         setRoundGapMax(gap.maxSeconds);
+        setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(gap.gapSeconds));
         const activeSession = (status.active_session as Record<string, unknown> | null) ?? null;
         const running = Boolean(activeSession?.session_id);
         if (running && parseNum(activeSession?.session_id) > 0) {
@@ -518,6 +527,7 @@ export default function AiRecommendation() {
           setRoundGapDraft(String(gap.gapSeconds));
           setRoundGapMin(gap.minSeconds);
           setRoundGapMax(gap.maxSeconds);
+          setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(gap.gapSeconds));
           const activeSession = (status.active_session as Record<string, unknown> | null) ?? null;
           const sid = parseNum(activeSession?.session_id);
           if (sid > 0) setSessionId((prev) => prev ?? sid);
@@ -573,6 +583,7 @@ export default function AiRecommendation() {
           setRoundGapSeconds(secs);
           setRoundGapDraft(String(secs));
           setCadence((prev) => ({ ...prev, roundMinGapMs: ms }));
+          setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(secs));
         })
         .catch((e: Error) => setManualError(e.message))
         .finally(() => setRoundGapBusy(false));
@@ -656,14 +667,20 @@ export default function AiRecommendation() {
           {showProduct && r.product ? <span className="ai-picks-product">{r.product}</span> : null}
           <span className="ai-picks-combo">{r.combo}</span>
           {r.odds ? <span className="ai-picks-odds">@ {r.odds}</span> : null}
-          {r.count > 1 && <span className="ai-picks-badge">×{r.count}</span>}
-          {r.ev_status === "negative" && <span className="ai-picks-badge warn">EV−</span>}
-          {hasFix && <span className="ai-picks-badge fix">系統修正</span>}
+          <span className="ai-picks-row-badges">
+            {r.count > 1 && <span className="ai-picks-badge">×{r.count}</span>}
+            {r.ev_status === "negative" && <span className="ai-picks-badge warn">EV−</span>}
+            {hasFix && <span className="ai-picks-badge fix">系統修正</span>}
+          </span>
         </div>
-        <p className="ai-picks-reason muted">{cleaned || "—"}</p>
+        {cleaned ? <p className="ai-picks-reason muted">{cleaned}</p> : null}
       </li>
     );
   };
+
+  const picksRoundNo = parseNum(picks?._status?.round_no);
+  const qplRows = mergePickRows(picks?.qpl ?? []);
+  const otherRows = mergePickRows(picks?.others ?? []);
 
   const confidencePct =
     picks && typeof picks.confidence === "number" && Number.isFinite(picks.confidence)
@@ -671,294 +688,437 @@ export default function AiRecommendation() {
       : null;
 
   const nextRoundHint = formatNextRoundHint(cadence, now.getTime(), Boolean(typingState));
+  const roundGapSelectValue =
+    ROUND_GAP_PRESETS.includes(roundGapSeconds) && !roundGapEditingCustom
+      ? String(roundGapSeconds)
+      : "custom";
+  const showCustomGapEditor = roundGapEditingCustom || !ROUND_GAP_PRESETS.includes(roundGapSeconds);
 
   return (
     <div className="ai-rec-page">
       <PageHeader title="智能分析（AI）" subtitle="AI 議會即時分析本場賽事，開跑前發布共識。" />
 
       <div className="card ai-council-statusbar">
-        <span className="ai-council-chip race">
-          {meetingDate && venueCode ? `${meetingDate} · ${venueCode} · R${raceNo}` : "尚未選擇場次"}
-        </span>
-        {meetingDate && venueCode && <RaceTimeContext meetingDate={meetingDate} race={selectedRace} />}
-        <span className={`ai-council-chip ${sessionStateText.includes("進行中") ? "live" : ""}`}>
-          {sessionStateText}
-        </span>
-        {nextRoundHint ? (
-          <span className={`ai-council-chip cadence ${cadence.runningRound || typingState ? "live" : ""}`}>
-            {nextRoundHint}
+        <div className="ai-council-status-head">
+          <div className="ai-council-status-race">
+            <span className="ai-council-race-title">
+              {meetingDate && venueCode ? `${meetingDate} · ${venueCode} · 第 ${raceNo} 場` : "尚未選擇場次"}
+            </span>
+          </div>
+          {meetingDate && venueCode ? (
+            <RaceTimeContext meetingDate={meetingDate} race={selectedRace} variant="compact" />
+          ) : null}
+        </div>
+        <div className="ai-council-status-rows">
+          <span className={`ai-council-chip ${sessionStateText.includes("進行中") ? "live" : ""}`}>
+            {sessionStateText}
           </span>
-        ) : null}
-        <span className={`ai-council-chip ${ws.connected ? "ok" : "warn"}`}>
-          {ws.connected ? "即時連線" : "連線中斷"}
-        </span>
-        <OddsSyncChips
-          race={
-            meetingDate && venueCode
-              ? { meeting_date: meetingDate, venue_code: venueCode, race_no: raceNo }
-              : null
-          }
-          councilRunning={cadence.sessionRunning && !cadence.finalized}
-        />
+          {nextRoundHint ? (
+            <span className={`ai-council-chip cadence ${cadence.runningRound || typingState ? "live" : ""}`}>
+              {nextRoundHint}
+            </span>
+          ) : null}
+          <span className="ai-council-status-divider" aria-hidden="true" />
+          <span className={`ai-council-chip ${ws.connected ? "ok" : "warn"}`}>
+            {ws.connected ? "即時連線" : "連線中斷"}
+          </span>
+          <OddsSyncChips
+            race={
+              meetingDate && venueCode
+                ? { meeting_date: meetingDate, venue_code: venueCode, race_no: raceNo }
+                : null
+            }
+            councilRunning={cadence.sessionRunning && !cadence.finalized}
+          />
+        </div>
       </div>
 
       <div className="card ai-rec-action-card ai-council-layout">
-        <div className="controls action-row ai-rec-action-row ai-council-controls">
-          <div>
-            <label className="field-label">賽馬日／場地</label>
-            <select
-              value={meetingIdx}
-              onChange={(e) => setMeetingIdx(Number(e.target.value))}
-              disabled={!meetings.length || loadingMeetings}
-            >
-              {meetings.map((m, i) => (
-                <option key={`${m.date}-${m.venueCode}-${i}`} value={i}>
-                  {String(m.date).slice(0, 10)} · {m.venueCode}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">場次</label>
-            <select
-              value={raceNo}
-              onChange={(e) => setRaceNo(Number(e.target.value))}
-              disabled={!raceNumbers.length}
-            >
-              {raceNumbers.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button type="button" className="btn btn-primary" onClick={startCouncil} disabled={!meetingDate}>
-            啟動議會
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={stopCouncil} disabled={!meetingDate}>
-            停止本場
-          </button>
-          <button
-            type="button"
-            className={`btn ai-council-autostart-toggle ${dayAutoStart ? "on" : "off"}`}
-            onClick={toggleDayAutoStart}
-            disabled={!meetingDate || dayAutoStartBusy}
-            title="開啟後，當日每場賽事會在開跑前自動召開會議；關閉則只有手動啟動的場次會開會"
-          >
-            全日自動開會：{dayAutoStart ? "開" : "關"}
-          </button>
-          <div className="ai-council-round-gap" title="兩輪 AI 討論之間的最短等待時間；倒數會依此動態更新">
-            <label className="field-label">回合間隔</label>
-            <div className="ai-council-round-gap-row">
-              {ROUND_GAP_PRESETS.map((sec) => (
-                <button
-                  key={sec}
-                  type="button"
-                  className={`ai-council-round-gap-btn ${roundGapSeconds === sec ? "active" : ""}`}
-                  disabled={roundGapBusy}
-                  onClick={() => applyRoundGap(sec)}
-                >
-                  {sec}秒
-                </button>
-              ))}
-              <input
-                type="number"
-                className="ai-council-round-gap-input"
-                min={roundGapMin}
-                max={roundGapMax}
-                step={1}
-                value={roundGapDraft}
-                disabled={roundGapBusy}
-                onChange={(e) => setRoundGapDraft(e.target.value)}
-                aria-label="自訂回合間隔秒數"
-              />
+        <div className="ai-council-toolbar">
+          <section className="ai-council-toolbar-section" aria-label="場次與控制">
+            <h3 className="ai-council-toolbar-section-title">場次</h3>
+            <div className="ai-council-field">
+              <label className="field-label" htmlFor="council-meeting">
+                賽馬日／場地
+              </label>
+              <select
+                id="council-meeting"
+                className="ai-council-select"
+                value={meetingIdx}
+                onChange={(e) => setMeetingIdx(Number(e.target.value))}
+                disabled={!meetings.length || loadingMeetings}
+              >
+                {meetings.map((m, i) => (
+                  <option key={`${m.date}-${m.venueCode}-${i}`} value={i}>
+                    {String(m.date).slice(0, 10)} · {m.venueCode}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="ai-council-field ai-council-field-race">
+              <label className="field-label" htmlFor="council-race">
+                場次
+              </label>
+              <select
+                id="council-race"
+                className="ai-council-select ai-council-select-race"
+                value={raceNo}
+                onChange={(e) => setRaceNo(Number(e.target.value))}
+                disabled={!raceNumbers.length}
+              >
+                {raceNumbers.map((n) => (
+                  <option key={n} value={n}>
+                    第 {n} 場
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="ai-council-actions">
               <button
                 type="button"
-                className="btn btn-ghost ai-council-round-gap-apply"
-                disabled={roundGapBusy}
-                onClick={() => applyRoundGap(parseNum(roundGapDraft))}
+                className="btn btn-primary"
+                onClick={startCouncil}
+                disabled={!meetingDate}
+                title="啟動或恢復本場 AI 議會"
               >
-                套用
+                啟動議會
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={stopCouncil}
+                disabled={!meetingDate}
+                title="暫停本場會議"
+              >
+                停止
               </button>
             </div>
-          </div>
-          <div className="ai-council-session-picker">
-            <label className="field-label">歷史會議</label>
-            <select
-              value={sessionId ?? ""}
-              onChange={(e) => setSessionId(e.target.value ? Number(e.target.value) : null)}
-              disabled={!sessions.length}
-            >
-              {sessions.length === 0 ? (
-                <option value="">無紀錄</option>
-              ) : (
-                sessions.map((s) => (
-                  <option key={s.session_id} value={s.session_id}>
-                    #{s.session_id} · {s.message_count ?? 0} 則 · {s.status === "running" ? "進行中" : "已結束"}
-                  </option>
-                ))
-              )}
-            </select>
+          </section>
+
+          <section className="ai-council-toolbar-section" aria-label="議會設定">
+            <h3 className="ai-council-toolbar-section-title">設定</h3>
             <button
               type="button"
-              className="btn btn-ghost ai-council-refresh-btn"
-              onClick={refreshSessions}
-              disabled={!meetingDate || !venueCode}
+              className={`ai-council-toggle ${dayAutoStart ? "on" : ""}`}
+              onClick={toggleDayAutoStart}
+              disabled={!meetingDate || dayAutoStartBusy}
+              title="開啟後，當日各場會在開跑前自動召開會議"
+              aria-pressed={dayAutoStart}
             >
-              刷新
+              <span className="ai-council-toggle-indicator" aria-hidden="true" />
+              <span>全日自動開會</span>
             </button>
-          </div>
+            <div className="ai-council-field ai-council-field-interval">
+              <label className="field-label" htmlFor="council-round-gap">
+                回合間隔
+              </label>
+              <div className="ai-council-interval-row">
+                <select
+                  id="council-round-gap"
+                  className="ai-council-select"
+                  value={roundGapSelectValue}
+                  disabled={roundGapBusy}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "custom") {
+                      setRoundGapEditingCustom(true);
+                      return;
+                    }
+                    setRoundGapEditingCustom(false);
+                    applyRoundGap(Number(v));
+                  }}
+                >
+                  {ROUND_GAP_PRESETS.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {sec} 秒
+                    </option>
+                  ))}
+                  <option value="custom">自訂</option>
+                </select>
+                {showCustomGapEditor ? (
+                  <>
+                    <input
+                      type="number"
+                      className="ai-council-interval-input"
+                      min={roundGapMin}
+                      max={roundGapMax}
+                      step={1}
+                      value={roundGapDraft}
+                      disabled={roundGapBusy}
+                      aria-label="自訂回合間隔秒數"
+                      onChange={(e) => setRoundGapDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyRoundGap(parseNum(roundGapDraft));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost ai-council-interval-apply"
+                      disabled={roundGapBusy}
+                      onClick={() => applyRoundGap(parseNum(roundGapDraft))}
+                    >
+                      套用
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div className="ai-council-field ai-council-field-history">
+              <label className="field-label" htmlFor="council-session">
+                歷史會議
+              </label>
+              <div className="ai-council-history-row">
+                <select
+                  id="council-session"
+                  className="ai-council-select ai-council-select-history"
+                  value={sessionId ?? ""}
+                  onChange={(e) => setSessionId(e.target.value ? Number(e.target.value) : null)}
+                  disabled={!sessions.length}
+                >
+                  {sessions.length === 0 ? (
+                    <option value="">無紀錄</option>
+                  ) : (
+                    sessions.map((s) => (
+                      <option key={s.session_id} value={s.session_id}>
+                        #{s.session_id} · {s.message_count ?? 0} 則 · {s.status === "running" ? "進行中" : "已結束"}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-ghost ai-council-refresh-btn"
+                  onClick={refreshSessions}
+                  disabled={!meetingDate || !venueCode}
+                  title="刷新會議列表"
+                >
+                  刷新
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
-        <div className="ai-council-main">
+        <section className="ai-council-chat-panel">
+          <header className="ai-council-panel-header">
+            <div className="ai-council-panel-heading">
+              <h3 className="ai-council-panel-title">議會聊天室</h3>
+              <p className="ai-council-panel-subtitle muted">與分析師即時討論；提問可 @kelly</p>
+            </div>
+            <span className="ai-council-panel-meta">
+              {messages.length > 0 ? `${messages.length} 則訊息` : "等待開場"}
+            </span>
+          </header>
+
           <div className="ai-council-chat-wrap">
-          <div className="ai-council-chat-list" ref={chatListRef} onScroll={onChatScroll}>
-            {messages.length === 0 ? (
-              <p className="muted">尚未有聊天內容。可啟動議會，或直接發送你的提案。</p>
-            ) : (
-              renderedMessages.map((row) => {
-                const m = row.message;
-                const meta = row.meta;
-                const speaker = asText(meta.speaker || meta.agent_code);
-                const isUser = m.role === "user";
-                const isSystem = m.role === "system" || speaker === "system";
-                const normalizedContent = normalizeMessageContent(m.content);
-                if (isSystem) {
+            <div className="ai-council-chat-list" ref={chatListRef} onScroll={onChatScroll}>
+              {messages.length === 0 && !typingState ? (
+                <div className="ai-council-chat-empty">
+                  <p className="ai-council-chat-empty-title">尚無會議記錄</p>
+                  <p className="muted">按「啟動議會」開始本場分析，或直接輸入你的問題。</p>
+                </div>
+              ) : (
+                renderedMessages.map((row) => {
+                  const m = row.message;
+                  const meta = row.meta;
+                  const speaker = asText(meta.speaker || meta.agent_code);
+                  const isUser = m.role === "user";
+                  const isSystem = m.role === "system" || speaker === "system";
+                  const normalizedContent = normalizeMessageContent(m.content);
+                  if (isSystem) {
+                    return (
+                      <div key={`${m.id}-${m.seq}`} className="ai-council-msg-block">
+                        {row.showRoundDivider ? (
+                          <div className="ai-council-round-divider-wrap">
+                            <span className="ai-council-round-divider">第 {row.roundNo} 輪</span>
+                          </div>
+                        ) : null}
+                        <div className="ai-council-system-msg">{normalizedContent}</div>
+                      </div>
+                    );
+                  }
+                  const style = agentStyle(speaker);
+                  const userName = asText(meta.username) || "你";
+                  const who = isUser ? userName : style.name;
+                  const lineCount = normalizedContent ? normalizedContent.split("\n").length : 0;
+                  const isLongMessage = normalizedContent.length > 1400 || lineCount > 26;
+                  const messageBody = <ReactMarkdown>{normalizedContent || "（空內容）"}</ReactMarkdown>;
+                  const disposition = dispositionLabelZh(asText(meta.bookie_disposition));
                   return (
-                    <div key={`${m.id}-${m.seq}`}>
-                      {row.showRoundDivider && <div className="ai-council-round-divider">Round {row.roundNo}</div>}
-                      <div className="ai-council-system-msg">{normalizedContent}</div>
+                    <div key={`${m.id}-${m.seq}`} className="ai-council-msg-block">
+                      {row.showRoundDivider ? (
+                        <div className="ai-council-round-divider-wrap">
+                          <span className="ai-council-round-divider">第 {row.roundNo} 輪</span>
+                        </div>
+                      ) : null}
+                      <article className={`ai-council-msg ${isUser ? "user" : "agent"}`}>
+                        {!isUser ? (
+                          <span className="ai-council-avatar" style={{ backgroundColor: style.color }} aria-hidden="true">
+                            {style.letter}
+                          </span>
+                        ) : null}
+                        <div className="ai-council-msg-body">
+                          <header className="ai-council-msg-head">
+                            <div className="ai-council-msg-who">
+                              <strong style={!isUser ? { color: style.color } : undefined}>{who}</strong>
+                              {!isUser && style.title ? (
+                                <span className="ai-council-role muted">{style.title}</span>
+                              ) : null}
+                            </div>
+                            <span className="muted ai-council-msg-time">
+                              {hktDisplay(m.created_at_utc, m.created_at_hkt)}
+                              {disposition ? ` · ${disposition}` : null}
+                            </span>
+                          </header>
+                          {isLongMessage ? (
+                            <details className="ai-council-msg-collapsible" open={m.role === "user"}>
+                              <summary>展開完整內容（{lineCount} 行）</summary>
+                              <div className="ai-council-msg-content">{messageBody}</div>
+                            </details>
+                          ) : (
+                            <div className="ai-council-msg-content">{messageBody}</div>
+                          )}
+                        </div>
+                        {isUser ? (
+                          <span className="ai-council-avatar ai-council-avatar-user" aria-hidden="true">
+                            你
+                          </span>
+                        ) : null}
+                      </article>
                     </div>
                   );
-                }
-                const style = agentStyle(speaker);
-                const userName = asText(meta.username) || "你";
-                const who = isUser ? userName : style.name;
-                const lineCount = normalizedContent ? normalizedContent.split("\n").length : 0;
-                const isLongMessage = normalizedContent.length > 1400 || lineCount > 26;
-                const messageBody = <ReactMarkdown>{normalizedContent || "（空內容）"}</ReactMarkdown>;
-                return (
-                  <div key={`${m.id}-${m.seq}`}>
-                    {row.showRoundDivider && <div className="ai-council-round-divider">Round {row.roundNo}</div>}
-                    <article className={`ai-council-msg ${isUser ? "user" : "agent"}`}>
-                      {!isUser && (
-                        <span className="ai-council-avatar" style={{ backgroundColor: style.color }}>
-                          {style.letter}
-                        </span>
-                      )}
-                      <div className="ai-council-msg-body">
-                        <header className="ai-council-msg-head">
-                          <strong style={!isUser ? { color: style.color } : undefined}>{who}</strong>
-                          {!isUser && style.title ? <span className="ai-council-role muted">{style.title}</span> : null}
-                          <span className="muted ai-council-msg-time">
-                            {hktDisplay(m.created_at_utc, m.created_at_hkt)}
-                            {row.turnNo > 0 ? ` · T${row.turnNo}` : ""}
-                            {asText(meta.bookie_disposition) ? ` · ${asText(meta.bookie_disposition)}` : ""}
-                          </span>
-                        </header>
-                        {isLongMessage ? (
-                          <details className="ai-council-msg-collapsible" open={m.role === "user"}>
-                            <summary>展開完整分析（{lineCount} 行）</summary>
-                            <div className="ai-council-msg-content">{messageBody}</div>
-                          </details>
-                        ) : (
-                          <div className="ai-council-msg-content">{messageBody}</div>
-                        )}
+                })
+              )}
+              {typingState && (
+                <article className="ai-council-msg agent ai-council-msg-typing">
+                  <span
+                    className="ai-council-avatar"
+                    style={{ backgroundColor: agentStyle(typingState.speaker).color }}
+                    aria-hidden="true"
+                  >
+                    {agentStyle(typingState.speaker).letter}
+                  </span>
+                  <div className="ai-council-msg-body">
+                    <header className="ai-council-msg-head">
+                      <div className="ai-council-msg-who">
+                        <strong style={{ color: agentStyle(typingState.speaker).color }}>
+                          {speakerDisplayName(typingState.speaker)}
+                        </strong>
+                        <span className="ai-council-role muted">正在輸入</span>
                       </div>
-                    </article>
+                    </header>
+                    <div className="ai-council-msg-content">
+                      <span className="ai-council-typing-dots" aria-label="正在輸入">
+                        ...
+                      </span>
+                    </div>
                   </div>
-                );
-              })
-            )}
-            {typingState && (
-              <article className="ai-council-msg agent ai-council-msg-typing">
-                <span
-                  className="ai-council-avatar"
-                  style={{ backgroundColor: agentStyle(typingState.speaker).color }}
-                >
-                  {agentStyle(typingState.speaker).letter}
-                </span>
-                <div className="ai-council-msg-body">
-                  <header className="ai-council-msg-head">
-                    <strong style={{ color: agentStyle(typingState.speaker).color }}>
-                      {speakerDisplayName(typingState.speaker)}
-                    </strong>
-                    <span className="muted ai-council-msg-time">
-                      {typingState.roundNo > 0 ? `Round ${typingState.roundNo}` : ""}
-                      {typingState.turnNo > 0 ? ` · T${typingState.turnNo}` : ""}
-                    </span>
-                  </header>
-                  <div className="ai-council-msg-content">
-                    <span className="ai-council-typing-dots" aria-label="typing">
-                      ...
-                    </span>
-                  </div>
-                </div>
-              </article>
+                </article>
+              )}
+            </div>
+            {unseenCount > 0 && (
+              <button
+                type="button"
+                className="ai-council-jump-latest"
+                onClick={() => {
+                  stickToBottomRef.current = true;
+                  setUnseenCount(0);
+                  scrollChatToBottom();
+                }}
+              >
+                {unseenCount} 則新訊息 ↓
+              </button>
             )}
           </div>
-          {unseenCount > 0 && (
-            <button
-              type="button"
-              className="ai-council-jump-latest"
-              onClick={() => {
-                stickToBottomRef.current = true;
-                setUnseenCount(0);
-                scrollChatToBottom();
-              }}
-            >
-              {unseenCount} 則新訊息 ↓
-            </button>
-          )}
-          </div>
-          <form className="ai-council-input-row" onSubmit={submitMessage}>
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={pendingUserReply ? "議會回應中…可繼續補充意見" : "輸入你的與會意見（可用 @quant @bookie 定向提問）"}
-            />
-            <button type="submit" className="btn btn-primary">
-              發送
-            </button>
-          </form>
-        </div>
-        <aside className={`ai-council-picks card ${picks?._status?.is_final ? "final" : ""}`}>
-          <h3>會議即時共識</h3>
+
+          <footer className="ai-council-composer">
+            <label className="field-label" htmlFor="council-message-input">
+              你的發言
+            </label>
+            <form className="ai-council-input-row" onSubmit={submitMessage}>
+              <input
+                id="council-message-input"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={
+                  pendingUserReply ? "議會回應中，可繼續補充…" : "輸入問題或指示（例如：@kelly 而家邊匹最穩？）"
+                }
+              />
+              <button type="submit" className="btn btn-primary" disabled={!draft.trim()}>
+                發送
+              </button>
+            </form>
+          </footer>
+        </section>
+
+        <aside className={`ai-council-picks-panel card ${picks?._status?.is_final ? "final" : ""}`}>
+          <header className="ai-council-panel-header ai-council-picks-header">
+            <div className="ai-council-panel-heading">
+              <h3 className="ai-council-panel-title">會議即時共識</h3>
+              <p className="ai-council-panel-subtitle muted">首席分析師本輪綜合結論</p>
+            </div>
+            {picks ? (
+              <span className={`ai-picks-badge ${picks._status?.is_final ? "final" : "interim"}`}>
+                {picks._status?.is_final ? "FINAL" : "進行中"}
+              </span>
+            ) : null}
+          </header>
+
           {picks ? (
-            <>
-              <p className="ai-council-picks-tag">
-                <span className={`ai-picks-badge ${picks._status?.is_final ? "final" : "interim"}`}>
-                  {picks._status?.is_final ? "FINAL" : "進行中"}
-                </span>
-                {parseNum(picks._status?.round_no) > 0 ? (
-                  <span className="muted"> Round {parseNum(picks._status?.round_no)}</span>
-                ) : null}
-                {picks.updated_at_hkt ? <span className="muted"> · {picks.updated_at_hkt} HKT</span> : null}
-              </p>
-              <p className="ai-picks-summary">{picks.summary_zh || picks.summary_en || "—"}</p>
+            <div className="ai-council-picks-body">
+              <div className="ai-council-picks-meta">
+                {picksRoundNo > 0 ? <span>第 {picksRoundNo} 輪</span> : null}
+                {picks.updated_at_hkt ? <span>{picks.updated_at_hkt} HKT 更新</span> : null}
+              </div>
+
+              {(picks.summary_zh || picks.summary_en) && (
+                <div className="ai-council-picks-summary-card">
+                  <p className="ai-picks-summary">{picks.summary_zh || picks.summary_en}</p>
+                </div>
+              )}
+
               {confidencePct != null && (
                 <div className="ai-picks-confidence">
-                  <span className="muted">信心</span>
+                  <div className="ai-picks-confidence-label">
+                    <span className="muted">信心指數</span>
+                    <strong>{confidencePct}%</strong>
+                  </div>
                   <div className="ai-picks-confidence-track">
                     <div className="ai-picks-confidence-fill" style={{ width: `${confidencePct}%` }} />
                   </div>
-                  <span>{confidencePct}%</span>
                 </div>
               )}
-              <h4>QPL 組合</h4>
-              <ul className="ai-picks-list">
-                {mergePickRows(picks.qpl ?? []).map((r, i) => renderPickRow(r, `qpl-${i}`, false))}
-              </ul>
-              <h4>其他彩池</h4>
-              <ul className="ai-picks-list">
-                {mergePickRows(picks.others ?? []).map((r, i) => renderPickRow(r, `other-${i}`, true))}
-              </ul>
-            </>
+
+              <section className="ai-council-picks-section">
+                <h4 className="ai-council-picks-section-title">位置 Q 主攻</h4>
+                {qplRows.length ? (
+                  <ul className="ai-picks-list">
+                    {qplRows.map((r, i) => renderPickRow(r, `qpl-${i}`, false))}
+                  </ul>
+                ) : (
+                  <p className="ai-council-picks-empty muted">本輪尚未有 QPL 建議</p>
+                )}
+              </section>
+
+              <section className="ai-council-picks-section">
+                <h4 className="ai-council-picks-section-title">其他彩池</h4>
+                {otherRows.length ? (
+                  <ul className="ai-picks-list">
+                    {otherRows.map((r, i) => renderPickRow(r, `other-${i}`, true))}
+                  </ul>
+                ) : (
+                  <p className="ai-council-picks-empty muted">本輪尚未有其他彩池建議</p>
+                )}
+              </section>
+            </div>
           ) : (
-            <p className="muted">尚未有推薦結果。</p>
+            <div className="ai-council-picks-empty-state">
+              <p className="ai-council-picks-empty-title">尚無共識</p>
+              <p className="muted">議會開始後，每輪總結會顯示於此。</p>
+            </div>
           )}
         </aside>
-        {meetingsErr && <p className="error-text ai-rec-error-line">{meetingsErr}</p>}
-        {manualError && <p className="error-text ai-rec-error-line">{manualError}</p>}
+        {meetingsErr && <p className="error-text ai-rec-error-line ai-council-layout-full">{meetingsErr}</p>}
+        {manualError && <p className="error-text ai-rec-error-line ai-council-layout-full">{manualError}</p>}
       </div>
 
       <footer className="ai-rec-footnote muted">所有時間以香港時間（HKT, UTC+8）顯示。</footer>
