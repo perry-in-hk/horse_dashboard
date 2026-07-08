@@ -26,9 +26,13 @@ interface ActiveMeeting {
   date?: string;
   venueCode?: string;
   races?: ActiveRace[];
+  source?: "active" | "history";
 }
 interface MeetingsResponse {
   meetings: ActiveMeeting[];
+}
+interface MeetingHistoryResponse {
+  items: ActiveMeeting[];
 }
 interface CouncilMessage {
   id: number;
@@ -246,6 +250,38 @@ function mergePickRows(rows: PickRow[]): MergedPickRow[] {
   return [...map.values()];
 }
 
+function mergeMeetings(active: ActiveMeeting[], historical: ActiveMeeting[]): ActiveMeeting[] {
+  const merged = new Map<string, ActiveMeeting>();
+
+  for (const item of [...historical, ...active]) {
+    const date = String(item.date ?? "").slice(0, 10);
+    const venueCode = String(item.venueCode ?? "").trim();
+    if (!date || !venueCode) continue;
+    const key = `${date}|${venueCode}`;
+    const existing = merged.get(key);
+    const raceMap = new Map<string, ActiveRace>();
+    for (const race of existing?.races ?? []) raceMap.set(String(race.no ?? ""), race);
+    for (const race of item.races ?? []) {
+      const no = String(race.no ?? "").trim();
+      if (!no) continue;
+      const prev = raceMap.get(no);
+      raceMap.set(no, { ...(prev ?? {}), ...race });
+    }
+    merged.set(key, {
+      date,
+      venueCode,
+      races: [...raceMap.values()].sort((a, b) => parseNum(a.no) - parseNum(b.no)),
+      source: item.source === "active" || existing?.source === "active" ? "active" : "history",
+    });
+  }
+
+  return [...merged.values()].sort((a, b) => {
+    const dateCmp = String(b.date ?? "").localeCompare(String(a.date ?? ""));
+    if (dateCmp !== 0) return dateCmp;
+    return String(a.venueCode ?? "").localeCompare(String(b.venueCode ?? ""));
+  });
+}
+
 export default function AiRecommendation() {
   const initialMeetingRace = useMemo(() => readSharedMeetingRace(), []);
   const [meetings, setMeetings] = useState<ActiveMeeting[]>([]);
@@ -291,9 +327,20 @@ export default function AiRecommendation() {
 
   const loadMeetings = useCallback(() => {
     setMeetingsErr(null);
-    return apiFetch<MeetingsResponse>("/api/realtime/meetings")
-      .then((r) => {
-        const list = r.meetings ?? [];
+    return Promise.allSettled([
+      apiFetch<MeetingsResponse>("/api/realtime/meetings"),
+      apiFetch<MeetingHistoryResponse>("/api/council/meeting-history"),
+    ])
+      .then(([activeResp, historyResp]) => {
+        const active =
+          activeResp.status === "fulfilled"
+            ? (activeResp.value.meetings ?? []).map((m) => ({ ...m, source: "active" as const }))
+            : [];
+        const historical =
+          historyResp.status === "fulfilled"
+            ? (historyResp.value.items ?? []).map((m) => ({ ...m, source: "history" as const }))
+            : [];
+        const list = mergeMeetings(active, historical);
         setMeetings(list);
         const saved = readSharedMeetingRace();
         if (list.length) {
@@ -306,10 +353,18 @@ export default function AiRecommendation() {
             setRaceNo(resolveRaceNo([...new Set(nums)].sort((a, b) => a - b), saved.raceNo));
           }
         }
-      })
-      .catch((e: Error) => {
-        setMeetingsErr(e.message);
-        setMeetings([]);
+        if (!list.length) {
+          const activeErr = activeResp.status === "rejected" ? activeResp.reason : null;
+          const historyErr = historyResp.status === "rejected" ? historyResp.reason : null;
+          const err = activeErr ?? historyErr;
+          if (err instanceof Error) {
+            setMeetingsErr(err.message);
+          } else if (err) {
+            setMeetingsErr(String(err));
+          }
+        } else if (activeResp.status === "rejected") {
+          setMeetingsErr("即時場次暫時不可用，已顯示歷史 AI 場次。");
+        }
       })
       .finally(() => setLoadingMeetings(false));
   }, []);
@@ -873,6 +928,7 @@ export default function AiRecommendation() {
                 {meetings.map((m, i) => (
                   <option key={`${m.date}-${m.venueCode}-${i}`} value={i}>
                     {String(m.date).slice(0, 10)} · {m.venueCode}
+                    {m.source === "history" ? " · 歷史" : ""}
                   </option>
                 ))}
               </select>
