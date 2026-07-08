@@ -10,6 +10,7 @@ import {
   startCouncilSession,
   stopCouncilSession,
 } from "./lib/councilService.js";
+import { ingestRaceResults, shouldIngestForStatus, statusUnavailable } from "./lib/raceResultIngest.js";
 import { formatHktDate, isEndedRaceStatus, parseHktDateTime } from "./lib/timeHkt.js";
 
 let timer = null;
@@ -69,6 +70,26 @@ async function tick() {
             raceNo,
             reason: "race_ended",
           });
+          if (statusUnavailable(race.status)) {
+            // Mark cancelled/void so UI/export know results will not arrive.
+            ingestRaceResults({
+              meetingDate,
+              venueCode,
+              raceNo,
+              raceStatus: race.status,
+            }).catch((e) =>
+              console.warn(`[councilScheduler] results unavailable mark failed for ${key}:`, e?.message ?? e)
+            );
+          } else if (shouldIngestForStatus(race.status)) {
+            ingestRaceResults({
+              meetingDate,
+              venueCode,
+              raceNo,
+              raceStatus: race.status,
+            }).catch((e) =>
+              console.warn(`[councilScheduler] race results ingest failed for ${key}:`, e?.message ?? e)
+            );
+          }
           continue;
         }
         if (isRaceStartedStatus(race.status)) {

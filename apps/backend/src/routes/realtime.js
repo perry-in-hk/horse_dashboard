@@ -8,6 +8,7 @@ import {
   getCurrentSync,
   isSyncBusy,
 } from "../lib/oddsWorkerRuntime.js";
+import { getRaceResultsPayload, ingestRaceResults } from "../lib/raceResultIngest.js";
 import { getLastSyncResult } from "../lib/syncState.js";
 import { getWorkerIntervalMs, setWorkerIntervalMs } from "../lib/realtimeSettings.js";
 import {
@@ -337,6 +338,52 @@ router.get("/snapshot-counts", async (req, res, next) => {
       [q.meeting_date, q.venue_code]
     );
     res.json({ counts: r.rows });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Official placings + dividends for a race (from DB; triggers ingest when still pending).
+ * Query: meeting_date, venue_code, race_no; optional race_status for cancelled/void marking.
+ */
+router.get("/race-results", async (req, res, next) => {
+  try {
+    const parsed = raceKeyQuery
+      .extend({
+        race_status: z.string().optional(),
+        refresh: z
+          .union([z.literal("1"), z.literal("true"), z.literal("0"), z.literal("false")])
+          .optional(),
+      })
+      .safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+    }
+    const q = parsed.data;
+    const wantRefresh = q.refresh === "1" || q.refresh === "true";
+    let payload = await getRaceResultsPayload({
+      meetingDate: q.meeting_date,
+      venueCode: q.venue_code,
+      raceNo: q.race_no,
+    });
+
+    if (wantRefresh || payload.status === "pending") {
+      await ingestRaceResults({
+        meetingDate: q.meeting_date,
+        venueCode: q.venue_code,
+        raceNo: q.race_no,
+        raceStatus: q.race_status ?? null,
+        force: wantRefresh,
+      }).catch((e) => console.warn("[realtime/race-results ingest]", e?.message ?? e));
+      payload = await getRaceResultsPayload({
+        meetingDate: q.meeting_date,
+        venueCode: q.venue_code,
+        raceNo: q.race_no,
+      });
+    }
+
+    res.json(payload);
   } catch (e) {
     next(e);
   }
