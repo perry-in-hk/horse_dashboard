@@ -7,7 +7,10 @@
 		reverse_proxy backend:4000
 	}
 	handle /ws/council* {
-		reverse_proxy backend:4000
+		reverse_proxy backend:4000 {
+			# Keep WebSocket upgrades stable through TLS termination.
+			flush_interval -1
+		}
 	}
 	handle {
 		reverse_proxy frontend:5173
