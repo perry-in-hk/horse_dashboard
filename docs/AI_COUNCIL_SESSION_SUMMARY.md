@@ -212,6 +212,7 @@ Redis keys：
 
 - **狀態列**：場次、RaceTimeContext、會議狀態、倒數 chip、WS 連線、OddsSyncChips。
 - **控制列**：啟動／停止、全日自動開會、**回合間隔**（預設 15/30/45/60/90/120 秒 + 自訂）、歷史 session 選擇。
+- **複習過往賽馬日**：見 [`AI_COUNCIL_HISTORICAL_MEETINGS.md`](AI_COUNCIL_HISTORICAL_MEETINGS.md)（下拉選單「· 歷史」、Docker 重建、HV/ST 場地）。
 - **聊天室**：角色頭像色（Kelly 粉、Lead 紅等）、typing 氣泡、共識卡（含系統修正 badge）。
 
 主要檔案：
@@ -273,16 +274,41 @@ Realtime 頁 Race field 對後備顯示 `Back Up`（底部），詳見 `docs/PRO
 
 ---
 
-## 13. 相關文件
+## 13. Production WebSocket 備註（Linode / HTTPS）
+
+AI Council 在正式站使用 `/ws/council` WebSocket。
+
+本輪已確認的 production guardrails：
+
+- HTTPS 頁面不可使用 `ws://` / `http://` 作為 `VITE_WS_URL` 目標；前端現已自動回退到同源 `wss://<host>/ws/council`。
+- Docker Compose 的 `frontend` 仍是 `vite dev`，所以 proxy 目標必須是 **`backend:4000`**，不能是容器內的 `localhost:4000`。
+- Caddy 必須轉發 `handle /ws/council* { reverse_proxy backend:4000 }`。
+- Linode 上本專案實際部署路徑曾確認為 **`/root/horse_dashboard`**；若 `deploy` 使用者在 `~/` 找不到 repo，不代表網站沒部署。
+
+若正式站 AI 頁空白且 console 出現：
+
+- `Uncaught DOMException: The operation is insecure`
+- `Firefox can’t establish a connection to the server at wss://.../ws/council`
+
+優先檢查：
+
+1. 前端是否已拉到包含 HTTPS WebSocket fallback 的 commit。
+2. `frontend` 的 `DEV_PROXY_TARGET` 是否為 `http://backend:4000`。
+3. `docker compose up -d --build` 是否在 **`/root/horse_dashboard`** 內執行。
+
+---
+
+## 14. 相關文件
 
 - `docs/AI_COUNCIL_ISSUES_AND_ARCHITECTURE.md` — 早期問題與架構
 - `docs/AGENT_HANDOFF_COUNCIL_STABILITY.md` — Agent 交接與驗證清單
 - `docs/PROJECT_HANDOFF.md` §4.4 — Racecard 馬號 / 後備馬
+- `docs/PROJECT_HANDOFF.md` §4.5 — Production AI 頁 WebSocket
 - `.env.example` — Council / Odds sync 變數範例
 
 ---
 
-## 14. 後續可選優化
+## 15. 後續可選優化
 
 - 倒數與 interval 變更時，可選擇是否重置 `last_round_completed_at`（目前為即時套用新 gap 比較）。
 - Kelly / Lead 對 user 指令的 audit log（哪一輪採納／拒絕）。
