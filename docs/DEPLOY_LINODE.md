@@ -244,6 +244,40 @@ docker compose up -d --build
 
 3. **Browser still shows an old UI?** Hard-refresh (**Ctrl+Shift+R**) or a private window. Confirm the server is on the new commit: `git log -1 --oneline`. Confirm you opened **`http://<PUBLIC_IP>/`** (port **80**), not `:5173` (Vite is only inside Docker; Caddy exposes **80**).
 
+#### Successful case (2026-07-09)
+
+This exact recovery path worked for the HKJC Dashboard on Linode:
+
+1. The operator first tried `~/horse_dashboard` as user `deploy`, but that path did **not** exist.
+2. `find` showed the real project path was **`/root/horse_dashboard`**.
+3. `sudo -i` was required before running `git pull` / `docker compose`.
+4. The site was updated from `/root/horse_dashboard` with:
+
+```bash
+sudo -i
+cd /root/horse_dashboard
+git pull origin main
+docker compose up -d --build
+docker compose ps
+git log -1 --oneline
+```
+
+If commands like `git`, `docker compose`, or `.env` checks fail from `~/`, first verify you are in the folder that contains **`docker-compose.yml`**.
+
+#### If you do not know the repo path
+
+Use these commands first:
+
+```bash
+whoami
+pwd
+find ~ /root /opt /srv /var/www -maxdepth 4 -name docker-compose.yml 2>/dev/null
+sudo find /root /opt /srv /var/www -maxdepth 4 \( -name docker-compose.yml -o -name horse_dashboard \) 2>/dev/null
+sudo docker ps --format "table {{.Names}}\t{{.Status}}"
+```
+
+If `deploy` cannot read `/root`, use `sudo find ...` as above.
+
 #### `git pull` error: untracked files would be overwritten by merge
 
 If the repo **tracks** files such as `backup.sql`, `hkjc_clean.sql`, or `hkjc_restore.sql`, but the server has **local untracked** files with the **same names** (e.g. you uploaded dumps by hand), Git aborts the merge:
@@ -487,6 +521,39 @@ The app now uses WebSocket for the AI Council room (`/ws/council`).
 - From an **HTTPS** page, use **`wss://`** with the same host as the site.
 - Ensure Caddy forwards `handle /ws/council* { reverse_proxy backend:4000 }`.
 - `VITE_WS_URL` can be left empty for same-origin (`/ws` via Vite proxy in local dev), or set explicitly to your public WS base.
+- The frontend now rejects insecure **`ws://`** / **`http://`** targets when the page itself is **HTTPS** and falls back to same-origin **`wss://<host>/ws/council`**.
+
+### 9.3a AI page blank / `The operation is insecure`
+
+**Symptom**
+
+- Opening the AI page on the public HTTPS site shows a blank page.
+- Firefox console shows:
+  - `Uncaught DOMException: The operation is insecure.`
+  - `Firefox can’t establish a connection to the server at wss://<host>/ws/council?...`
+
+**Root causes observed in this project**
+
+1. Frontend `VITE_WS_URL` pointed to an insecure `ws://` / `http://` target while the page was loaded over HTTPS.
+2. In Docker Compose, the `frontend` container's Vite proxy was still targeting `localhost:4000`; inside the container, that does **not** reach the backend service. It must target **`backend:4000`**.
+3. Missing or incorrect `/ws/council` forwarding in the active Caddy path will also break Council WebSocket.
+
+**Working fix**
+
+- `useCouncilSocket.ts`: on HTTPS pages, reject insecure WS targets and fall back to same-origin `wss://`.
+- `apps/frontend/vite.config.ts`: proxy `/api`, `/health`, and `/ws` via a configurable `DEV_PROXY_TARGET`.
+- `docker-compose.yml`: set `DEV_PROXY_TARGET=http://backend:4000` for the `frontend` service.
+- `infra/docker/Caddyfile`: keep `handle /ws/council* { reverse_proxy backend:4000 }`.
+
+**Redeploy**
+
+```bash
+cd /root/horse_dashboard
+git pull origin main
+docker compose up -d --build
+```
+
+Then hard-refresh the browser and re-open the AI page.
 
 ### 9.4 Common HTTPS + Vite issues
 

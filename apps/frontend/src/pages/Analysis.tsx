@@ -22,6 +22,7 @@ interface RaceMeeting {
 }
 
 interface Runner {
+  race_no?: number;
   horse_no: number;
   horse_name: string;
   horse_code: string;
@@ -75,6 +76,7 @@ export default function Analysis() {
 
   // Race drill-down
   const [selectedMeeting, setSelectedMeeting] = useState<string>("");
+  const [selectedRaceNo, setSelectedRaceNo] = useState<string>("");
   const [runners, setRunners] = useState<Runner[]>([]);
 
   // Horse search + history
@@ -113,6 +115,7 @@ export default function Analysis() {
   useEffect(() => {
     if (!selectedMeeting) {
       setRunners([]);
+      setSelectedRaceNo("");
       return;
     }
     const [date, course] = selectedMeeting.split("|");
@@ -121,7 +124,9 @@ export default function Analysis() {
 
     // Fetch all races in this meeting
     const promises = Array.from({ length: meeting.race_count }, (_, i) =>
-      apiFetch<Runner[]>(`/api/analytics/race/${date}/${course}/${i + 1}/runners`).catch(() => [])
+      apiFetch<Runner[]>(`/api/analytics/race/${date}/${course}/${i + 1}/runners`)
+        .then((rows) => rows.map((row) => ({ ...row, race_no: i + 1 })))
+        .catch(() => [])
     );
     setLoadingRunners(true);
     Promise.all(promises)
@@ -259,21 +264,36 @@ export default function Analysis() {
 
   /* ── Aggregate score for horse cards ───────────────────────────────── */
 
-  const runnersWithAgg = useMemo(() => {
+  const selectedMeetingMeta = useMemo(() => {
+    if (!selectedMeeting) return null;
+    const [date, course] = selectedMeeting.split("|");
+    return meetings.find((m) => m.race_date === date && m.racecourse === course) ?? null;
+  }, [selectedMeeting, meetings]);
+
+  const raceGroups = useMemo(() => {
     if (!runners.length) return [];
-    const byCode = new Map<string, Runner & { avg_score: number; race_count: number }>();
-    for (const r of runners) {
-      if (!r.horse_code) continue;
-      const existing = byCode.get(r.horse_code);
-      if (!existing) {
-        byCode.set(r.horse_code, { ...r, avg_score: r.race_score, race_count: 1 });
-      } else {
-        existing.race_count++;
-        existing.avg_score = (existing.avg_score * (existing.race_count - 1) + r.race_score) / existing.race_count;
-      }
+    const grouped = new Map<number, Runner[]>();
+    for (const runner of runners) {
+      const raceNo = Number(runner.race_no);
+      if (!Number.isFinite(raceNo) || raceNo < 1) continue;
+      const list = grouped.get(raceNo) ?? [];
+      list.push(runner);
+      grouped.set(raceNo, list);
     }
-    return Array.from(byCode.values()).sort((a, b) => b.avg_score - a.avg_score);
+    return Array.from(grouped.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([raceNo, items]) => ({
+        raceNo,
+        items,
+        ranked: [...items].sort((a, b) => b.race_score - a.race_score),
+      }));
   }, [runners]);
+
+  const visibleRaceGroups = useMemo(() => {
+    const raceNo = Number(selectedRaceNo);
+    if (!Number.isFinite(raceNo) || raceNo < 1) return raceGroups;
+    return raceGroups.filter((group) => group.raceNo === raceNo);
+  }, [raceGroups, selectedRaceNo]);
 
   /* ── Render ─────────────────────────────────────────────────────────── */
 
@@ -309,6 +329,19 @@ export default function Analysis() {
                 {meetings.map((m) => (
                   <option key={`${m.race_date}|${m.racecourse}`} value={`${m.race_date}|${m.racecourse}`}>
                     {m.race_date.slice(0, 10)} {m.racecourse} ({m.race_count}R)
+                  </option>
+                ))}
+              </select>
+              <label>場次</label>
+              <select
+                value={selectedRaceNo}
+                onChange={(e) => setSelectedRaceNo(e.target.value)}
+                disabled={!raceGroups.length}
+              >
+                <option value="">全部場次</option>
+                {raceGroups.map((group) => (
+                  <option key={group.raceNo} value={String(group.raceNo)}>
+                    第 {group.raceNo} 場
                   </option>
                 ))}
               </select>
@@ -375,62 +408,94 @@ export default function Analysis() {
       {/* ── Race view ──────────────────────────────────────────────────── */}
       {mode === "race" && (
         <>
-          {runners.length > 0 && (
+          {selectedMeetingMeta && !loadingRunners && (
+            <div className="stat-row">
+              <div className="stat-pill">
+                <span className="label">賽馬日</span>
+                <span className="value" style={{ fontSize: 16 }}>
+                  {selectedMeetingMeta.race_date.slice(0, 10)}
+                </span>
+              </div>
+              <div className="stat-pill">
+                <span className="label">場地</span>
+                <span className="value">{selectedMeetingMeta.racecourse}</span>
+              </div>
+              <div className="stat-pill">
+                <span className="label">場次數</span>
+                <span className="value">{selectedMeetingMeta.race_count}</span>
+              </div>
+              <div className="stat-pill">
+                <span className="label">已載入馬匹</span>
+                <span className="value">{runners.length}</span>
+              </div>
+            </div>
+          )}
+          {visibleRaceGroups.length > 0 && (
             <>
-              <div className="horse-cards">
-                {runnersWithAgg.map((r) => (
-                  <div key={r.horse_code} className="horse-card" onClick={() => selectHorse(r.horse_code, r.horse_name)} style={{ cursor: "pointer" }}>
-                    <div className="horse-card-header">
-                      <div>
-                        <div className="horse-card-name">{r.horse_name}</div>
+              {visibleRaceGroups.map((group) => (
+                <div key={group.raceNo} className="card full-span" style={{ marginTop: 20 }}>
+                  <h3 className="card-title">第 {group.raceNo} 場</h3>
+                  <div className="horse-cards">
+                    {group.ranked.map((r) => (
+                      <div
+                        key={`${group.raceNo}-${r.horse_code}`}
+                        className="horse-card"
+                        onClick={() => selectHorse(r.horse_code, r.horse_name)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <div className="horse-card-header">
+                          <div>
+                            <div className="horse-card-name">{r.horse_name}</div>
+                            <div className="horse-card-meta">
+                              <span>馬號: {r.horse_no ?? "-"}</span>
+                              <span>Code: {r.horse_code}</span>
+                              <span>Jockey: {r.jockey}</span>
+                              <span>Draw: {r.draw ?? "-"}</span>
+                            </div>
+                          </div>
+                          <div className="horse-card-score">{r.race_score.toFixed(1)}</div>
+                        </div>
                         <div className="horse-card-meta">
-                          <span>Code: {r.horse_code}</span>
-                          <span>Jockey: {r.jockey}</span>
-                          <span>Draw: {r.draw ?? "-"}</span>
+                          <span>Pos: {r.finish_position ?? "-"}</span>
+                          <span>Odds: {r.win_odds ?? "-"}</span>
+                          <span>Time: {r.finish_time ?? "-"}</span>
                         </div>
                       </div>
-                      <div className="horse-card-score">{r.avg_score.toFixed(1)}</div>
-                    </div>
-                    <div className="horse-card-meta">
-                      <span>Pos: {r.finish_position ?? "-"}</span>
-                      <span>Odds: {r.win_odds ?? "-"}</span>
-                      <span>Time: {r.finish_time ?? "-"}</span>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
 
-              <div className="card full-span" style={{ marginTop: 20 }}>
-                <h3 className="card-title">Race Results</h3>
-                <div className="table-scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>#</th><th>Horse</th><th>Code</th><th>Jockey</th><th>Pos</th><th>Score</th><th>Odds</th><th>Draw</th><th>Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {runners.map((r, i) => (
-                        <tr key={i} className={r.position_int === 1 ? "champion" : ""}>
-                          <td>{r.horse_no}</td>
-                          <td>{r.horse_name}</td>
-                          <td>{r.horse_code}</td>
-                          <td>{r.jockey}</td>
-                          <td>{r.finish_position}</td>
-                          <td>{r.race_score}</td>
-                          <td>{r.win_odds ?? "-"}</td>
-                          <td>{r.draw ?? "-"}</td>
-                          <td>{r.finish_time ?? "-"}</td>
+                  <div className="table-scroll" style={{ marginTop: 16 }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th><th>Horse</th><th>Code</th><th>Jockey</th><th>Pos</th><th>Score</th><th>Odds</th><th>Draw</th><th>Time</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {group.items.map((r, i) => (
+                          <tr key={`${group.raceNo}-${i}`} className={r.position_int === 1 ? "champion" : ""}>
+                            <td>{r.horse_no}</td>
+                            <td>{r.horse_name}</td>
+                            <td>{r.horse_code}</td>
+                            <td>{r.jockey}</td>
+                            <td>{r.finish_position}</td>
+                            <td>{r.race_score}</td>
+                            <td>{r.win_odds ?? "-"}</td>
+                            <td>{r.draw ?? "-"}</td>
+                            <td>{r.finish_time ?? "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              ))}
             </>
           )}
           {loadingRunners && <p className="muted">載入賽事資料中…</p>}
-          {!runners.length && selectedMeeting && !loadingRunners && <p className="muted">此賽馬日目前沒有可顯示的結果。</p>}
+          {!visibleRaceGroups.length && selectedMeeting && !loadingRunners && (
+            <p className="muted">此賽馬日目前沒有可顯示的結果。</p>
+          )}
           {!selectedMeeting && <p className="muted">請先選擇賽馬日以查看賽事結果與馬匹卡片。</p>}
         </>
       )}

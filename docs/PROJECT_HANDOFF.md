@@ -194,6 +194,35 @@ Backend 必須在 `:4000` 可達（Docker backend 或本機 `npm run dev:backend
 
 **主要檔案**：`apps/backend/src/lib/hkjcOddsClient.js`、`apps/frontend/src/pages/Realtime.tsx`、`apps/backend/src/lib/councilService.js`、`apps/backend/src/routes/ai.js`、`apps/backend/src/lib/ai/prompts.js`、`apps/backend/src/lib/ai/buildRaceContext.js`。
 
+### 4.5 Production AI 頁 WebSocket（2026-07-09）
+
+**症狀**：Linode 正式 HTTPS 網站可開頁，但進 `AI` 頁時可能出現空白頁 / `WebSocket 尚未連線`，Firefox console 顯示 `The operation is insecure` 或無法建立 `wss://.../ws/council` 連線。
+
+**本次確認的根因**
+
+1. HTTPS 頁面若使用 `VITE_WS_URL=ws://...` 或 `http://...`，瀏覽器會直接拒絕 WebSocket。
+2. Docker Compose 內的 `frontend` 是跑 `vite dev`；其 server-side proxy 若寫成 `localhost:4000`，在容器內不會指到 `backend` service。
+3. 正式入口必須經 `Caddy` 將 `/ws/council` 轉發到 backend。
+
+**目前約定**
+
+- `useCouncilSocket.ts`：HTTPS 頁面只接受安全目標；不安全的 `ws://` / `http://` 會回退到同源 `wss://<host>/ws/council`。
+- `apps/frontend/vite.config.ts`：proxy 目標改由 `DEV_PROXY_TARGET` 控制。
+- `docker-compose.yml`：`frontend.environment.DEV_PROXY_TARGET=http://backend:4000`。
+- `infra/docker/Caddyfile`：保留 `handle /ws/council* { reverse_proxy backend:4000 }`。
+
+**部署驗證**
+
+- 伺服器實際專案路徑為 `/root/horse_dashboard`（不是 `~/horse_dashboard`）。
+- 更新命令：
+  ```bash
+  sudo -i
+  cd /root/horse_dashboard
+  git pull origin main
+  docker compose up -d --build
+  ```
+- 驗證：AI 頁不再因 insecure WebSocket 而空白，Council 可正常連線。
+
 ---
 
 ## 5. 後端要點
