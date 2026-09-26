@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test src/lib/ai/council/scorecard.test.js src/lib/ai/pricingCard.test.js src/lib/ai/council/picksSchema.test.js",
+    "test": "node --test src/lib/ai/council/scorecard.test.js src/lib/ai/pricingCard.test.js src/lib/ai/council/picksSchema.test.js src/lib/ai/backtestPricing.test.js",
     "start": "node src/index.js",
     "dev": "node --env-file=../../.env --env-file=.env.local --watch src/index.js"
   },

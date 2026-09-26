@@ -45,3 +45,19 @@ test("residual is capped and a short-priced favourite without odds is dropped", 
   assert.equal(gated.others.length, 0);
   assert.equal(gated.summary_zh, "本輪無正期望值");
 });
+
+test("a longshot above the odds cap is not released", () => {
+  const gated = applyEdgeGate(
+    {
+      summary_zh: "冷門",
+      summary_en: "longshot",
+      confidence: 0.4,
+      qpl: [],
+      others: [{ product: "WIN", combo: "1", odds: "40", ev_status: "positive", reason_zh: "冷", reason_en: "long" }],
+    },
+    [{ no: "1", odds: 40, market_prob: 0.02, model_prob: 0.05, edge: 1 }],
+    12
+  );
+  assert.equal(gated.others.length, 0);
+  assert.equal(gated.summary_zh, "本輪無正期望值");
+});

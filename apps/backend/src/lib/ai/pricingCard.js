@@ -4,6 +4,10 @@
  */
 
 export const EDGE_MIN = Number(process.env.COUNCIL_EDGE_MIN ?? 0.02);
+// Walk-forward on local results through 2026-01-07: residual weights fit to 0,
+// and every wider odds band lost money. Above this price the ±0.03 cap alone
+// manufactures a positive edge. Default 12. Set COUNCIL_MAX_BET_ODDS=0 to disable.
+export const MAX_BET_ODDS = Number(process.env.COUNCIL_MAX_BET_ODDS ?? 12);
 const ADJUST_CAP = 0.03;
 
 export function impliedWinProbs(winOdds) {
@@ -125,6 +129,7 @@ function comboProb(product, legs, map, fieldSize) {
 export function edgeForPick(product, combo, odds, pricing, fieldSize) {
   const price = Number(String(odds ?? "").replace(/,/g, ""));
   if (!(price > 1)) return { ok: false, reason: "no_odds" };
+  if (MAX_BET_ODDS > 0 && price > MAX_BET_ODDS) return { ok: false, reason: "odds_cap" };
   const legs = legsOf(combo);
   const prob = comboProb(String(product || "").toUpperCase(), legs, byNo(pricing), fieldSize);
   if (prob == null) return { ok: false, reason: "no_model" };
