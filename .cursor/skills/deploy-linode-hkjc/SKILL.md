@@ -53,6 +53,7 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 | **Restore** | For a full SQL restore: **stop** backend/scraper/recommender, **DROP DATABASE … WITH (FORCE)**, **CREATE DATABASE**, then **`psql < file`**, then **`docker compose up -d`**. |
 | **Verify Chinese** | After restore, **`SELECT horse_name …`** in `psql`. If names are wrong in SQL, **re-dump** with a UTF-8-safe method — not a frontend bug. |
 | **HTTPS (Compose)** | **`SITE_ADDRESS`** must be set on the server to the **public DNS name** (matches **A** record). **`SESSION_COOKIE_SECURE=true`** when serving only HTTPS. |
+| **Shared Linode with Mia** | Public **80/443** are **`mia_ordering-caddy-1`** only. Do **not** start **`hkjc-caddy`**. Do **not** run bare `docker compose up -d` in `/root/horse_dashboard`. Rebuild with the service list in `docs/linode/INCIDENT_2026-09-26.md`. After Mia Caddy is recreated, `docker network connect horse_dashboard_default mia_ordering-caddy-1`. |
 | **Security** | Do not expose **5432** or **6379** publicly; do not commit `.env` or paste secrets in chat. |
 | **Git / large dumps** | Database dump files (`backup.sql`, `hkjc_*.sql`, `*.dump`) are now **gitignored** — they will never be committed. Keep backups in a secure location outside the repo. |
 
@@ -72,7 +73,8 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 | Confusing **Postgres password** with **dashboard password** | §5 **C5** — two different systems; DB auth is `POSTGRES_*`, while dashboard login uses app-local user credentials. |
 | `git pull` / `git push`: **Password authentication is not supported** | §6 **D1** — GitHub HTTPS: use **PAT** or **SSH**, not account password. |
 | `untracked working tree files would be overwritten by merge` | §6 **D1** — move or remove conflicting local files, then `git pull`. Database dumps are gitignored and won't cause this. |
-| Deployed but **still old UI** / old behaviour | §6 **D1** — run `docker compose up -d --build` after pull; hard-refresh browser; confirm `git log -1` on server; use **port 80** or **443**, not `:5173`. |
+| Deployed but **still old UI** / old behaviour | §6 **D1** — rebuild after pull; hard-refresh browser; confirm `git log -1` on server; use **port 80** or **443**, not `:5173`. On the shared Linode, rebuild **without** `caddy` (`docs/linode/INCIDENT_2026-09-26.md`). |
+| **`port is already allocated`** on **80/443** | `mia_ordering-caddy-1` already owns those ports. Do not start `hkjc-caddy`. Do not `systemctl restart docker` to free them. |
 | Local `.env` uses `hkjc`, server uses `hkjc_1` (or vice versa) | §6 **D1** (local vs server) + §5 C2–C3 — **never** copy PC `.env` to server blindly; match server Postgres role. |
 | **`Blocked request` / host not allowed (Vite)** | §9 **9.4** — `server.allowedHosts: true` in `vite.config.ts`; rebuild frontend container. |
 | **`Set SITE_ADDRESS in .env`** (Compose) | §9 — add `SITE_ADDRESS=your.hostname` to **server** `.env`; must match DNS. |
@@ -83,7 +85,7 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 
 ## Architecture reminder (one paragraph)
 
-**Caddy** on **:80** (and **:443** with **`SITE_ADDRESS`**) → `/api` and `/health` to **backend**, UI to **frontend**. Browsers use **`http(s)://<PUBLIC_IP-or-hostname>/`** (not `:5173` / `:4000` on the host). Details: `docs/DEPLOY_LINODE.md` §1 and §9.
+On a machine that runs **only** this stack, **Caddy** on **:80** (and **:443** with **`SITE_ADDRESS`**) sends `/api` and `/health` to **backend**, and the UI to **frontend**. On the current Linode, that public Caddy is **`mia_ordering-caddy-1`**, not `hkjc-caddy`. Browsers use **`http(s)://<PUBLIC_IP-or-hostname>/`** (not `:5173` / `:4000` on the host). Details: `docs/DEPLOY_LINODE.md` §1 and §9, and `docs/linode/INCIDENT_2026-09-26.md`.
 
 ---
 

@@ -40,6 +40,7 @@ This section is the **short story** of a full deploy + data migration. Read the 
 ## 1. Architecture (short)
 
 - **Caddy** listens on **:80** (and **:443** when using HTTPS), proxies `/api*` and `/health` to **backend:4000**, and everything else to **frontend:5173**. With a **`SITE_ADDRESS`** in `.env`, Caddy obtains **Let’s Encrypt** certificates and serves **HTTPS** automatically.
+- **This Linode already runs two sites.** Public **80/443** belong to **`mia_ordering-caddy-1`**, which routes `miapet.cc.cd` and `lord-in-hk.ccwu.cc`. Do **not** start **`hkjc-caddy`**. Rebuild with an explicit service list. Full write-up: [`docs/linode/INCIDENT_2026-09-26.md`](linode/INCIDENT_2026-09-26.md).
 - **Backend** and **frontend** are **not** mapped to host ports **4000/5173** in production `docker-compose.yml`; only **Caddy** is public on **80** / **443**. For local dev with host ports, use **`docker-compose.dev.yml`**.
 - **Postgres** and **Redis** store data in **Docker volumes on the server** — a separate database from your **local** dev instance unless you **migrate** data (see [§7](#7-phase-e--copy-local-database-to-server-optional)).
 
@@ -263,6 +264,19 @@ git log -1 --oneline
 ```
 
 If commands like `git`, `docker compose`, or `.env` checks fail from `~/`, first verify you are in the folder that contains **`docker-compose.yml`**.
+
+#### Shared server (Mia + HKJC) — do not start `hkjc-caddy`
+
+On `139.162.51.138`, **`docker compose up -d`** and **`docker compose up -d --build`** also start **`hkjc-caddy`**, which binds **80** and **443**. Those ports are already taken by **`mia_ordering-caddy-1`**. The 2026-09-26 update used this instead:
+
+```bash
+cd /root/horse_dashboard
+docker compose up -d --build postgres redis backend frontend scraper recommender
+docker rm -f hkjc-caddy
+docker network connect horse_dashboard_default mia_ordering-caddy-1 2>/dev/null || true
+```
+
+Mia’s Caddyfile (`/home/deploy/mia_ordering/deploy/Caddyfile`) must keep the `lord-in-hk.ccwu.cc` site, including `handle /ws/council*`. Restart that Caddy only with `--env-file .env.production`, then connect the network again. Details: [`docs/linode/INCIDENT_2026-09-26.md`](linode/INCIDENT_2026-09-26.md).
 
 #### If you do not know the repo path
 
