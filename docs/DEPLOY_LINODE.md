@@ -280,30 +280,18 @@ If `deploy` cannot read `/root`, use `sudo find ...` as above.
 
 #### `git pull` error: untracked files would be overwritten by merge
 
-If the repo **tracks** files such as `backup.sql`, `hkjc_clean.sql`, or `hkjc_restore.sql`, but the server has **local untracked** files with the **same names** (e.g. you uploaded dumps by hand), Git aborts the merge:
-
-> `error: The following untracked working tree files would be overwritten by merge`
-
-**Fix — move them out of the repo directory** (keeps your copies):
+If git aborts a merge with `error: The following untracked working tree files would be overwritten by merge`, move or remove the conflicting local files, then pull again:
 
 ```bash
 cd ~/YOUR_REPO_FOLDER
-mkdir -p ~/sql_dumps_backup
-mv backup.sql hkjc_clean.sql hkjc_restore.sql ~/sql_dumps_backup/ 2>/dev/null || true
-git pull origin main
-```
-
-Or **delete** those filenames in the project folder if you do not need them on disk:
-
-```bash
-cd ~/YOUR_REPO_FOLDER
-rm -f backup.sql hkjc_clean.sql hkjc_restore.sql
+mkdir -p ~/backup_files
+mv <conflicting-file> ~/backup_files/ 2>/dev/null || true
 git pull origin main
 ```
 
 Then run **`docker compose up -d --build`** again.
 
-**Prevention:** Prefer **not** committing large SQL dumps to git (add patterns to `.gitignore` on the branch you push from) so production servers do not need those files in the tree at all.
+> **Note:** Database dump files (`backup.sql`, `hkjc_restore.sql`, `hkjc_clean.sql`, `*.dump`) are now in `.gitignore` and will never be tracked by git. You can safely keep local dump files in the repo directory without merge conflicts.
 
 #### Local versus server Postgres user
 

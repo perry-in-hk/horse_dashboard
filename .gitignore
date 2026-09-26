@@ -45,3 +45,10 @@ Desktop.ini
 # Project-specific
 postgres_data
 .firecrawl/
+
+# Database dumps (never commit - may contain sensitive data)
+backup.sql
+hkjc_restore.sql
+hkjc_clean.sql
+*.dump
+*.pg_dump

@@ -9,7 +9,7 @@ description: >-
   Postgres, finding the clone directory after git clone, Caddy ports 80/443, HTTPS, DuckDNS or free
   DNS, SITE_ADDRESS, SESSION_COOKIE_SECURE, Let's Encrypt, Vite blocked host / allowedHosts,
   VITE_WS_URL, HKJC production deploy, git pull on the server, GitHub HTTPS PAT vs password,
-  untracked files blocking merge (backup.sql / hkjc_restore.sql), docker compose rebuild after pull,
+  docker compose rebuild after pull,
   or UI still showing old version. Dashboard login: local username/password accounts in
   dashboard_users, AUTH_INITIAL_USERNAME/AUTH_INITIAL_PASSWORD bootstrap, SESSION_SECRET,
   SESSION_MAX_AGE_HOURS, and difference from POSTGRES_PASSWORD.
@@ -36,7 +36,7 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 5. **Dashboard auth (web login):** **`POSTGRES_PASSWORD`** is only for the **backend → Postgres** connection. Human dashboard users are managed in **`dashboard_users`** with bcrypt hashes. Required envs: **`SESSION_SECRET`**, optional **`SESSION_MAX_AGE_HOURS`**, and first-boot bootstrap **`AUTH_INITIAL_USERNAME`** / **`AUTH_INITIAL_PASSWORD`**. Full table: **`docs/DEPLOY_LINODE.md` §5 C5**.
 6. **HTTPS:** DNS **A** record → Linode IP; firewall **443**; server `.env` must include **`SITE_ADDRESS`** (hostname) and usually **`SESSION_COOKIE_SECURE=true`**; `docker compose up -d --build`. Details: **§9** in the doc.
 7. **Vite “Blocked request / host not allowed”** behind Caddy: **`server.allowedHosts: true`** in `apps/frontend/vite.config.ts`, rebuild frontend. **§9.4** in the doc.
-8. **Server code updates:** After `git push`, the server needs `git pull` **and** `docker compose up -d --build` (see `docs/DEPLOY_LINODE.md` §6 **D1**). If `git pull` aborts on **untracked files would be overwritten**, move or remove conflicting paths (often `backup.sql`, `hkjc_*.sql`), then pull again.
+8. **Server code updates:** After `git push`, the server needs `git pull` **and** `docker compose up -d --build` (see `docs/DEPLOY_LINODE.md` §6 **D1**). If `git pull` aborts on **untracked files would be overwritten**, move or remove the conflicting paths, then pull again.
 9. **GitHub over HTTPS:** Password login for `git push`/`git pull` is disabled — use a **Personal Access Token** or **SSH** (see §6 D1 in the doc).
 
 ---
@@ -54,7 +54,7 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 | **Verify Chinese** | After restore, **`SELECT horse_name …`** in `psql`. If names are wrong in SQL, **re-dump** with a UTF-8-safe method — not a frontend bug. |
 | **HTTPS (Compose)** | **`SITE_ADDRESS`** must be set on the server to the **public DNS name** (matches **A** record). **`SESSION_COOKIE_SECURE=true`** when serving only HTTPS. |
 | **Security** | Do not expose **5432** or **6379** publicly; do not commit `.env` or paste secrets in chat. |
-| **Git / large dumps** | Avoid committing huge `*.sql` dumps to the repo — they cause **untracked file** conflicts on `git pull` when the server already has local copies; prefer `.gitignore` + backups outside the clone. |
+| **Git / large dumps** | Database dump files (`backup.sql`, `hkjc_*.sql`, `*.dump`) are now **gitignored** — they will never be committed. Keep backups in a secure location outside the repo. |
 
 ---
 
@@ -71,7 +71,7 @@ If the user’s question is covered there, prefer quoting or paraphrasing that f
 | **Cannot log into the web app** | §5 **C5** — check `dashboard_users` account exists with non-null `password_hash`, verify rate limit state, and confirm backend env `SESSION_SECRET` / `AUTH_INITIAL_*`; use HTTPS + **`SESSION_COOKIE_SECURE=true`** when on TLS. |
 | Confusing **Postgres password** with **dashboard password** | §5 **C5** — two different systems; DB auth is `POSTGRES_*`, while dashboard login uses app-local user credentials. |
 | `git pull` / `git push`: **Password authentication is not supported** | §6 **D1** — GitHub HTTPS: use **PAT** or **SSH**, not account password. |
-| `untracked working tree files would be overwritten by merge` | §6 **D1** — move or remove conflicting files (e.g. `backup.sql`), then `git pull`. |
+| `untracked working tree files would be overwritten by merge` | §6 **D1** — move or remove conflicting local files, then `git pull`. Database dumps are gitignored and won't cause this. |
 | Deployed but **still old UI** / old behaviour | §6 **D1** — run `docker compose up -d --build` after pull; hard-refresh browser; confirm `git log -1` on server; use **port 80** or **443**, not `:5173`. |
 | Local `.env` uses `hkjc`, server uses `hkjc_1` (or vice versa) | §6 **D1** (local vs server) + §5 C2–C3 — **never** copy PC `.env` to server blindly; match server Postgres role. |
 | **`Blocked request` / host not allowed (Vite)** | §9 **9.4** — `server.allowedHosts: true` in `vite.config.ts`; rebuild frontend container. |

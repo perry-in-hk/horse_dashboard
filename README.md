@@ -103,4 +103,13 @@ Core PostgreSQL tables are initialized by backend startup:
 ```bash
 docker exec hkjc-postgres pg_dump -U hkjc hkjc_dashboard > backup.sql
 ```
+
+- To restore from a backup:
+
+```bash
+docker exec -i hkjc-postgres psql -U hkjc hkjc_dashboard < backup.sql
+```
+
+> **Note:** Database dump files are gitignored and should never be committed (they may contain sensitive user/session data). Keep your backups in a secure location outside the repository.
+
 # horse_inhk
