@@ -771,11 +771,17 @@ function hasReachedPreStartClose({ state, racePostTimeUtc, raceStartedByStatus }
 function oddsFingerprint(context) {
   const win = context?.oddsSummary?.win ?? {};
   const observed = String(context?.oddsSummary?.observed_at ?? "");
-  const body = Object.keys(win)
+  const winBody = Object.keys(win)
     .sort()
     .map((key) => `${key}:${win[key]}`)
     .join(",");
-  return `${observed}|${body}`;
+  const qin = Array.isArray(context?.pairPools?.qin) ? context.pairPools.qin : [];
+  const qinBody = qin
+    .map((row) => `${String(row?.comb ?? "").trim()}:${row?.odds ?? ""}`)
+    .filter((part) => !part.startsWith(":"))
+    .sort()
+    .join(",");
+  return `${observed}|${winBody}|qin:${qinBody}`;
 }
 
 async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {

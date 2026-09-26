@@ -137,32 +137,105 @@ export function edgeForPick(product, combo, odds, pricing, fieldSize) {
   return { ok: edge >= EDGE_MIN, edge, prob, reason: edge >= EDGE_MIN ? "edge" : "below_threshold" };
 }
 
+function annotatePick(row, product, pricing, fieldSize) {
+  const judged = edgeForPick(product, row?.combo, row?.odds, pricing, fieldSize);
+  return { row, product, judged };
+}
+
+function asReleased(item) {
+  return {
+    ...item.row,
+    product: item.product,
+    suggestion: false,
+    ev_status: "positive",
+    reason_zh: `${item.row.reason_zh}（edge ${item.judged.edge.toFixed(3)}）`,
+    reason_en: `${item.row.reason_en} (edge ${item.judged.edge.toFixed(3)})`,
+  };
+}
+
+function topReleased(items, limit) {
+  return items
+    .filter((item) => item.judged.ok)
+    .sort((a, b) => b.judged.edge - a.judged.edge)
+    .slice(0, limit)
+    .map(asReleased);
+}
+
+function comboKey(combo) {
+  return legsOf(combo).slice().sort((a, b) => Number(a) - Number(b)).join("-");
+}
+
+/** Highest-edge win quote at or under the odds cap. Edge may be negative. Not a released bet. */
+export function suggestWin(pricing) {
+  const rows = (pricing ?? []).filter((row) => {
+    const odds = Number(row?.odds);
+    if (!(odds > 1)) return false;
+    if (MAX_BET_ODDS > 0 && odds > MAX_BET_ODDS) return false;
+    return Number.isFinite(Number(row?.edge));
+  });
+  rows.sort((a, b) => b.edge - a.edge || a.odds - b.odds);
+  const best = rows[0];
+  if (!best) return null;
+  const edge = Number(best.edge).toFixed(3);
+  return {
+    product: "WIN",
+    combo: String(best.no),
+    odds: String(best.odds),
+    suggestion: true,
+    ev_status: "negative",
+    reason_zh: `未達最佳（edge ${edge}）`,
+    reason_en: `Not the best situation (edge ${edge})`,
+  };
+}
+
 export function applyEdgeGate(picks, pricing, fieldSize) {
   const src = picks && typeof picks === "object" ? picks : {};
-  const keep = (row, product) => {
-    const judged = edgeForPick(product, row?.combo, row?.odds, pricing, fieldSize);
-    if (!judged.ok) return null;
+  const qplItems = [];
+  const seenQpl = new Set();
+  for (const row of Array.isArray(src.qpl) ? src.qpl : []) {
+    const key = comboKey(row?.combo);
+    if (!key || seenQpl.has(key)) continue;
+    seenQpl.add(key);
+    qplItems.push(annotatePick(row, "QPL", pricing, fieldSize));
+  }
+  const byProduct = { WIN: [], PLA: [], QIN: [] };
+  for (const row of Array.isArray(src.others) ? src.others : []) {
+    const product = String(row?.product || "WIN").toUpperCase();
+    if (product === "QPL") {
+      const key = comboKey(row?.combo);
+      if (!key || seenQpl.has(key)) continue;
+      seenQpl.add(key);
+      qplItems.push(annotatePick(row, "QPL", pricing, fieldSize));
+      continue;
+    }
+    if (!byProduct[product]) continue;
+    byProduct[product].push(annotatePick(row, product, pricing, fieldSize));
+  }
+  const qpl = topReleased(qplItems, 3).map(({ product, ...row }) => row);
+  const others = ["WIN", "PLA", "QIN"].flatMap((product) => topReleased(byProduct[product], 1));
+  if (qpl.length || others.length) {
+    return { ...src, qpl, others };
+  }
+  const suggestion = suggestWin(pricing);
+  if (!suggestion) {
     return {
-      ...row,
-      ev_status: "positive",
-      reason_zh: `${row.reason_zh}（edge ${judged.edge.toFixed(3)}）`,
-      reason_en: `${row.reason_en} (edge ${judged.edge.toFixed(3)})`,
+      ...src,
+      qpl: [],
+      others: [],
+      summary_zh: "缺少可建議的賠率",
+      summary_en: "No quote within the odds cap to suggest.",
+      confidence: Math.min(Number(src.confidence ?? 0.2), 0.2),
+      data_freshness: "no_quote",
     };
-  };
-  const qpl = (Array.isArray(src.qpl) ? src.qpl : []).map((row) => keep(row, "QPL")).filter(Boolean).slice(0, 3);
-  const others = (Array.isArray(src.others) ? src.others : [])
-    .map((row) => keep(row, row?.product || "WIN"))
-    .filter(Boolean)
-    .slice(0, 4);
-  const empty = qpl.length === 0 && others.length === 0;
+  }
   return {
     ...src,
-    qpl,
-    others,
-    summary_zh: empty ? "本輪無正期望值" : src.summary_zh,
-    summary_en: empty ? "No positive-EV bet this round." : src.summary_en,
-    confidence: empty ? Math.min(Number(src.confidence ?? 0.2), 0.2) : src.confidence,
-    data_freshness: empty ? "no_edge" : src.data_freshness,
+    qpl: [],
+    others: [suggestion],
+    summary_zh: "本輪建議未達最佳",
+    summary_en: "Suggestion only. Not the best situation.",
+    confidence: Math.min(Number(src.confidence ?? 0.2), 0.2),
+    data_freshness: "suggestion",
   };
 }
 

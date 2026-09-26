@@ -122,12 +122,20 @@ function flattenPicks(picks) {
   const lines = [];
   const qpl = Array.isArray(picks?.qpl) ? picks.qpl : [];
   const others = Array.isArray(picks?.others) ? picks.others : [];
-  for (const row of qpl) lines.push({ product: "QPL", combo: String(row?.combo ?? ""), odds: String(row?.odds ?? "") });
+  for (const row of qpl) {
+    lines.push({
+      product: "QPL",
+      combo: String(row?.combo ?? ""),
+      odds: String(row?.odds ?? ""),
+      suggestion: Boolean(row?.suggestion),
+    });
+  }
   for (const row of others) {
     lines.push({
       product: String(row?.product ?? "WIN").toUpperCase(),
       combo: String(row?.combo ?? ""),
       odds: String(row?.odds ?? ""),
+      suggestion: Boolean(row?.suggestion),
     });
   }
   return lines.filter((row) => row.combo.trim());
@@ -167,6 +175,7 @@ export function scoreSlip({ picks, results, dividends }) {
       combo: line.combo,
       odds_at_pick: line.odds,
       closing_odds: closing,
+      suggestion: Boolean(line.suggestion),
       outcome,
       payout_hkd: payout,
       unit_return: unitReturn(outcome, payout),
@@ -176,8 +185,7 @@ export function scoreSlip({ picks, results, dividends }) {
   });
 }
 
-export function summarizeSettlements(rows) {
-  const list = rows ?? [];
+function summarizeGroup(list) {
   const decided = list.filter((r) => r.outcome === "hit" || r.outcome === "miss");
   const hits = decided.filter((r) => r.outcome === "hit").length;
   const byProduct = {};
@@ -200,6 +208,12 @@ export function summarizeSettlements(rows) {
     avg_confidence_miss: avg(confMiss),
     by_product: byProduct,
   };
+}
+
+export function summarizeSettlements(rows) {
+  const list = rows ?? [];
+  const released = summarizeGroup(list.filter((row) => !row.suggestion));
+  return { ...released, suggestion: summarizeGroup(list.filter((row) => row.suggestion)) };
 }
 
 export async function settleSession(db, sessionId) {
@@ -250,8 +264,8 @@ export async function settleSession(db, sessionId) {
     await db.query(
       `INSERT INTO hkjc_council_settlements (
          session_id, picks_version, line_no, product, combo, odds_at_pick, closing_odds,
-         outcome, payout_hkd, unit_return, confidence, finishers
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         outcome, payout_hkd, unit_return, confidence, finishers, suggestion
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         sessionId,
         pickRow.version,
@@ -265,6 +279,7 @@ export async function settleSession(db, sessionId) {
         line.unit_return,
         line.confidence,
         line.finishers,
+        Boolean(line.suggestion),
       ]
     );
   }

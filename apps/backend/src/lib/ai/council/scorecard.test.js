@@ -48,3 +48,28 @@ test("scoreSlip uses dividend payout for a hit and -1 for a miss", () => {
   assert.equal(summary.hits, 1);
   assert.equal(summary.misses, 1);
 });
+
+test("a suggestion marked 未達最佳 is kept out of the released hit rate", () => {
+  const lines = scoreSlip({
+    picks: {
+      confidence: 0.2,
+      qpl: [],
+      others: [{ product: "WIN", combo: "1", odds: "3", suggestion: true }],
+    },
+    results: [
+      { horse_no: 1, finish_position: "1", win_odds: 3 },
+      { horse_no: 2, finish_position: "2", win_odds: 5 },
+      { horse_no: 3, finish_position: "3", win_odds: 8 },
+      { horse_no: 4, finish_position: "4", win_odds: 10 },
+      { horse_no: 5, finish_position: "5", win_odds: 12 },
+      { horse_no: 6, finish_position: "6", win_odds: 15 },
+      { horse_no: 7, finish_position: "7", win_odds: 20 },
+    ],
+    dividends: [{ pool: "獨贏", combination: "1", payout_hkd: 30 }],
+  });
+  const summary = summarizeSettlements(lines);
+  assert.equal(summary.lines, 0);
+  assert.equal(summary.hits, 0);
+  assert.equal(summary.suggestion.lines, 1);
+  assert.equal(summary.suggestion.hits, 1);
+});

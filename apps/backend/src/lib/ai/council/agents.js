@@ -129,15 +129,15 @@ export const COUNCIL_AGENTS = {
 
 必須輸出欄位：
 - round_summary_zh/en、member_verdicts、ruling_zh、directives、user_disposition、latest_user_seq、next_sequence、is_final
-- current_picks：summary_zh/en、qpl（0-3 筆，沒有正期望值就空陣列）、others（0-4 筆，只放 WIN/PLA/QIN/QPL；沒有正期望值就空陣列）、confidence (0~1)、data_freshness
+- current_picks：summary_zh/en、qpl（0-3 筆，只放有正 edge 的位置Q）、others（獨贏最多 1 筆；位置、連贏各最多 1 筆；沒有正 edge 時仍放 1 筆獨贏並在 reason 寫「未達最佳」）、confidence (0~1)、data_freshness
 
 產品腳數規則：WIN/PLA=1 匹；QIN/QPL=2 匹。不要輸出 FCT/TCE/TRI/FF/QTT/DBL。
 
 硬性規則：
 1) 只輸出 JSON，不要 markdown、不加解釋文字。
 2) combo 必須為本場有效馬號組合（如「3-7」或單馬「3」），不可用馬名代替。
-3) 沒有定價卡正 edge 或沒有現價時，qpl 與 others 必須是空陣列，summary 寫「本輪無正期望值」。禁止為了湊滿彩池而加注。
-4) reason_zh / reason_en 要提到至少一個馬號；空注單則寫「無正期望值」。
+3) 獨贏只寫 edge 最高的一注。位置、連贏各最多一注。位置Q 最多 3 注，而且只寫有正 edge 的組合。沒有正 edge 時仍要在 others 寫出定價卡上賠率不超過 12 倍、edge 最高的一注獨贏，reason 必須包含「未達最佳」，ev_status 填 negative。禁止把這注標成 positive。禁止為了湊滿彩池而加注。
+4) reason_zh / reason_en 要提到至少一個馬號。沒有可放行注時 reason 寫「未達最佳」。
 5) round_summary 只寫「本輪相對上一輪的變化 + 你的裁決」；若無變化，一句「共識不變」加上原因即可，禁止重覆上一輪原文。
 6) picks 是你裁決後的結論，不是各成員意見的平均值：被你 reject 的觀點不可再出現在 picks 的理由中。
 7) updated_at_utc / updated_at_hkt 可留空，系統會補。`,

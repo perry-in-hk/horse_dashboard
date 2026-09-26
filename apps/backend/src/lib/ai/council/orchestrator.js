@@ -486,8 +486,8 @@ function buildBookieRoundPrompt({
     buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }),
     "",
     `combo 只能使用本場合法馬號：${(validHorseNos ?? []).join(", ") || "(見 RunnersTable)"}。`,
-    "qpl 最多 3 筆且 combo 不可重複；沒有正期望值就留空陣列。",
-    "others 最多 4 筆，只可使用 WIN/PLA/QIN/QPL。沒有正期望值就留空。禁止為了覆蓋彩池而加注。",
+    "qpl 最多 3 筆且 combo 不可重複；只寫有正 edge 的位置Q。",
+    "others 的獨贏只寫 edge 最高的一注，位置與連贏各最多一注。沒有正 edge 時仍要寫一注賠率不超過 12 倍、edge 最高的獨贏，reason 包含「未達最佳」，ev_status 必須是 negative。",
     "member_verdicts 必須涵蓋本輪每位有發言的成員；重複舊內容或空白發言一律 reject。",
     "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。",
     "directives 給每位成員的任務要具體到「查哪個數據、答哪個問題」，禁止空泛的「繼續觀察」。",
@@ -753,7 +753,7 @@ export async function runCouncilChatroomRound(input) {
   }
 
   const picksParsed = parseCouncilPicks(bookieObj?.current_picks ?? bookieObj?.picks ?? {}, validHorseNos);
-  const currentPicks = picksParsed.success ? gatePicks(picksParsed.data, context) : buildFallbackPicks();
+  const currentPicks = gatePicks(picksParsed.success ? picksParsed.data : buildFallbackPicks(), context);
   const roundSummaryZh = String(bookieObj?.round_summary_zh ?? currentPicks.summary_zh ?? "本輪總結：暫無。").trim();
   const roundSummaryEn = String(bookieObj?.round_summary_en ?? currentPicks.summary_en ?? "Round summary unavailable.").trim();
   // When picks fell back (or lack a summary), reuse the round summary so the
@@ -895,7 +895,7 @@ export async function runCouncilRound(input) {
   const bookiePrompt = [
     "請你作為 Bookie 輸出最終推薦。",
     "你必須輸出嚴格 JSON（不要 markdown）。",
-    "只輸出定價卡 edge 過門檻的注。qpl 與 others 可以是空陣列。沒有正期望值時 summary 寫「本輪無正期望值」。",
+    "獨贏只留 edge 最高的一注。沒有正 edge 時仍寫一注賠率不超過 12 倍的獨贏，reason 包含「未達最佳」，ev_status 填 negative。",
     "",
     "### Stage1",
     stage1Text,

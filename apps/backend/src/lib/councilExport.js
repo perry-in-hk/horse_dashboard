@@ -238,14 +238,18 @@ export async function buildCouncilExportMarkdown({ meetingDate, venueCode, raceN
         lines.push("_賽果尚未入庫，注單未結算_");
       } else {
         const s = settled.summary ?? {};
-        lines.push(`- 命中：${s.hits ?? 0}/${s.lines ?? 0}${s.hit_pct != null ? `（${s.hit_pct}%）` : ""}`);
-        lines.push(`- 單位回報合計：${s.unit_return_sum ?? "—"}`);
+        lines.push(`- 放行命中：${s.hits ?? 0}/${s.lines ?? 0}${s.hit_pct != null ? `（${s.hit_pct}%）` : ""}`);
+        lines.push(`- 放行單位回報合計：${s.unit_return_sum ?? "—"}`);
+        if (s.suggestion?.lines) {
+          lines.push(`- 未達最佳：${s.suggestion.hits ?? 0}/${s.suggestion.lines}，不計入放行`);
+        }
         lines.push(`- 命中注平均信心：${s.avg_confidence_hit ?? "—"}`);
         lines.push(`- 落空注平均信心：${s.avg_confidence_miss ?? "—"}`);
         lines.push("");
         for (const line of settled.lines ?? []) {
           const ret = line.unit_return == null ? "—" : line.unit_return;
-          lines.push(`- ${line.product} ${line.combo}：${line.outcome}，下注賠率 ${line.odds_at_pick || "—"}，結算賠率 ${line.closing_odds || "—"}，單位回報 ${ret}`);
+          const tag = line.suggestion ? "未達最佳 " : "";
+          lines.push(`- ${tag}${line.product} ${line.combo}：${line.outcome}，下注賠率 ${line.odds_at_pick || "—"}，結算賠率 ${line.closing_odds || "—"}，單位回報 ${ret}`);
         }
       }
     } catch {

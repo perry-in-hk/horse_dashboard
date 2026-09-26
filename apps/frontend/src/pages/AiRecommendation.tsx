@@ -73,6 +73,7 @@ interface ScorecardSummary {
   unit_return_sum: number | null;
   avg_confidence_hit: number | null;
   avg_confidence_miss: number | null;
+  suggestion?: ScorecardSummary;
 }
 interface ScorecardPayload {
   races: Array<{ race_no: number; summary: ScorecardSummary }>;
@@ -876,7 +877,7 @@ export default function AiRecommendation() {
           {r.odds ? <span className="ai-picks-odds">@ {r.odds}</span> : null}
           <span className="ai-picks-row-badges">
             {r.count > 1 && <span className="ai-picks-badge">×{r.count}</span>}
-            {r.ev_status === "negative" && <span className="ai-picks-badge warn">EV−</span>}
+            {r.ev_status === "negative" && <span className="ai-picks-badge warn">未達最佳</span>}
             {hasFix && <span className="ai-picks-badge fix">系統修正</span>}
           </span>
         </div>
@@ -1349,22 +1350,31 @@ export default function AiRecommendation() {
             <header className="ai-council-results-header">
               <h4 className="ai-council-picks-section-title">記分卡</h4>
             </header>
-            {!scorecard || !scorecard.totals?.lines ? (
+            {!scorecard || (!scorecard.totals?.lines && !scorecard.totals?.suggestion?.lines) ? (
               <p className="ai-council-picks-empty muted">本賽馬日尚未有可結算注單。</p>
             ) : (
               <>
                 <div className="ai-council-scorecard">
                   <div className="ai-council-scorecard-stat">
-                    <span>命中</span>
+                    <span>放行命中</span>
                     <strong>
                       {scorecard.totals.hits}/{scorecard.totals.lines}
                       {scorecard.totals.hit_pct != null ? ` · ${scorecard.totals.hit_pct}%` : ""}
                     </strong>
                   </div>
                   <div className="ai-council-scorecard-stat">
-                    <span>單位回報</span>
+                    <span>放行單位回報</span>
                     <strong>{scorecard.totals.unit_return_sum ?? "—"}</strong>
                   </div>
+                  {scorecard.totals.suggestion?.lines ? (
+                    <div className="ai-council-scorecard-stat">
+                      <span>未達最佳</span>
+                      <strong>
+                        {scorecard.totals.suggestion.hits}/{scorecard.totals.suggestion.lines}
+                        {scorecard.totals.suggestion.hit_pct != null ? ` · ${scorecard.totals.suggestion.hit_pct}%` : ""}
+                      </strong>
+                    </div>
+                  ) : null}
                   <div className="ai-council-scorecard-stat">
                     <span>命中注信心</span>
                     <strong>{scorecard.totals.avg_confidence_hit ?? "—"}</strong>

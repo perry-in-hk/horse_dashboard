@@ -376,9 +376,12 @@ CREATE TABLE IF NOT EXISTS hkjc_council_settlements (
   unit_return NUMERIC(12,4),
   confidence NUMERIC(6,4),
   finishers INT,
+  suggestion BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (session_id, picks_version, line_no)
 );
+
+ALTER TABLE hkjc_council_settlements ADD COLUMN IF NOT EXISTS suggestion BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_hkjc_council_settlements_session
   ON hkjc_council_settlements (session_id, picks_version);
