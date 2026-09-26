@@ -4,6 +4,7 @@ import { getRedisClient } from "./redisClient.js";
 import { buildRaceContext } from "./ai/buildRaceContext.js";
 import { buildOddsMomentumPromptBlock } from "./ai/oddsMomentum.js";
 import { runCouncilChatroomRound, runCouncilRound } from "./ai/council/orchestrator.js";
+import { settleSession } from "./ai/council/scorecard.js";
 import { fetchMeetingWithRunners, fetchRaceRunnersForRace } from "./hkjcOddsClient.js";
 import { armIntervalForRacesMerged, removeIntervalTargets } from "../oddsSyncWorker.js";
 import { getActiveIntervalTargets } from "./oddsWorkerRuntime.js";
@@ -17,6 +18,7 @@ const activatedDateMem = new Set();
 const dateKey = (meetingDate) => `council:activated:${meetingDate}`;
 const COUNCIL_MODE = String(process.env.COUNCIL_MODE ?? "chatroom").trim().toLowerCase();
 const PRE_START_CLOSE_MS = Number(process.env.COUNCIL_CLOSE_BEFORE_START_MS ?? 60 * 1000);
+const COUNCIL_MAX_ROUNDS = Math.max(1, Number(process.env.COUNCIL_MAX_ROUNDS ?? 3) || 3);
 const ROUND_GAP_DEFAULT_MS = Number(
   process.env.COUNCIL_ROUND_MIN_GAP_MS ?? process.env.COUNCIL_ROUND_INTERVAL_MS ?? 30 * 1000
 );
@@ -356,6 +358,10 @@ async function loadContext(meetingDate, venueCode, raceNo, userMessages) {
     pairPools: built.pairPools,
     allPools: built.allPools,
     formByHorse: built.formByHorse,
+    handicapBlock: built.handicapBlock,
+    pricing: built.pricing,
+    pricingBlock: built.pricingBlock,
+    raceMeta: built.raceMeta,
     oddsMomentumBlock,
     userMessages,
   };
@@ -565,6 +571,7 @@ function stopReasonSystemText(reason) {
   if (reason === "race_started") return "會議結束：賽事已開跑";
   if (reason === "race_ended") return "會議結束：賽事已結束";
   if (reason === "manual_stop") return "會議已暫停：再按「啟動議會」可延續討論";
+  if (reason === "max_rounds") return "會議結案：已達每場輪次上限，沿用最後一版注單";
   return `會議已結束（${reason}）`;
 }
 
@@ -575,6 +582,11 @@ export async function stopCouncilSession({ meetingDate, venueCode, raceNo, reaso
   state.stopped = true;
   await insertSystemMessage(state, stopReasonSystemText(reason), { event: "session_stop", reason }).catch(() => {});
   await setSessionStopped(state.session_id, reason);
+  try {
+    await settleSession(pool, state.session_id);
+  } catch (err) {
+    console.error("[council] settle session failed", err);
+  }
   activeSessions.delete(key);
   try {
     removeIntervalTargets([{ meeting_date: meetingDate, venue_code: venueCode, race_no: raceNo }]);
@@ -756,6 +768,16 @@ function hasReachedPreStartClose({ state, racePostTimeUtc, raceStartedByStatus }
   return Boolean(state?.race_started_at_utc);
 }
 
+function oddsFingerprint(context) {
+  const win = context?.oddsSummary?.win ?? {};
+  const observed = String(context?.oddsSummary?.observed_at ?? "");
+  const body = Object.keys(win)
+    .sort()
+    .map((key) => `${key}:${win[key]}`)
+    .join(",");
+  return `${observed}|${body}`;
+}
+
 async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
   const raceRuntime = await fetchRaceRuntimeInfo(meetingDate, venueCode, raceNo);
   if (raceRuntime.ended) {
@@ -795,6 +817,18 @@ async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
   const transcript = await loadRecentTranscript(state.session_id, 80);
   const context = await loadContext(meetingDate, venueCode, raceNo, userMessages);
   const roundNo = Math.max(1, Number(state.round_no ?? 0) + 1);
+  if (Number(state.round_no ?? 0) >= COUNCIL_MAX_ROUNDS) {
+    await stopCouncilSession({ meetingDate, venueCode, raceNo, reason: "max_rounds" });
+    return null;
+  }
+  const fingerprint = oddsFingerprint(context);
+  const oddsUnchanged = state.last_odds_fingerprint != null && state.last_odds_fingerprint === fingerprint;
+  const closing = shouldFinalize || roundNo >= COUNCIL_MAX_ROUNDS;
+  const skipAnalysts = oddsUnchanged && !pendingUserMessages.length && Number(state.round_no ?? 0) >= 1;
+  if (skipAnalysts && !closing) {
+    state.last_odds_fingerprint = fingerprint;
+    return null;
+  }
   const sequence = Array.isArray(state.next_sequence) && state.next_sequence.length ? state.next_sequence : ["quant", "historian", "trend", "scout"];
   const latestUserSeq = userMessages.length ? userMessages[userMessages.length - 1].seq : null;
 
@@ -807,7 +841,8 @@ async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
     roundNo,
     sequence,
     latestUserSeq,
-    shouldFinalize,
+    shouldFinalize: closing,
+    skipAnalysts,
     chairDirectives: state.chair_directives ?? null,
     chairRuling: state.chair_ruling ?? null,
     previousConfidence: state.last_confidence ?? null,
@@ -962,6 +997,7 @@ async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
   }
 
   state.round_no = round.round_no;
+  state.last_odds_fingerprint = fingerprint;
   state.next_sequence = round.bookie_turn.next_sequence;
   if (dispositionSeq) state.last_user_seq = dispositionSeq;
 
@@ -990,7 +1026,7 @@ async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
       meetingDate,
       venueCode,
       raceNo,
-      reason: shouldFinalize ? "pre_start_1m" : "finalized",
+      reason: shouldFinalize ? "pre_start_1m" : "max_rounds",
     });
   }
   return { round, picks: picksRow };

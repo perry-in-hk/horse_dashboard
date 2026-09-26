@@ -35,7 +35,7 @@ function normalizePickRow(raw, defaultProduct = null) {
   const row = {
     combo: toText(obj.combo ?? obj.combination ?? obj.horses ?? obj.horse_numbers ?? obj.horseNos, "待定"),
     odds: toText(obj.odds ?? obj.odd ?? obj.market_odds, ""),
-    ev_status: toText(obj.ev_status ?? obj.evStatus ?? obj.value_status, "positive").toLowerCase() === "negative" ? "negative" : "positive",
+    ev_status: toText(obj.ev_status ?? obj.evStatus ?? obj.value_status, "").toLowerCase() === "positive" ? "positive" : "negative",
     reason_zh: reasonZh,
     reason_en: reasonEn,
   };
@@ -87,19 +87,6 @@ function isOrderedProduct(product) {
   return p === "FCT" || p === "TCE" || p === "QTT";
 }
 
-function buildFallbackLegs(validHorseNos, count) {
-  const valid = normalizeHorseNos(validHorseNos);
-  if (!valid.length) return Array.from({ length: Math.max(1, count) }, (_, i) => i + 1);
-  const out = [];
-  const needed = Math.max(1, count);
-  for (const n of valid) {
-    out.push(n);
-    if (out.length >= needed) break;
-  }
-  while (out.length < needed) out.push(valid[0]);
-  return out;
-}
-
 function sanitizeCombo(combo, validHorseNos, countHint, keepOrder = false) {
   const valid = normalizeHorseNos(validHorseNos);
   const validSet = new Set(valid);
@@ -108,29 +95,22 @@ function sanitizeCombo(combo, validHorseNos, countHint, keepOrder = false) {
   const kept = [];
   const keptSeen = new Set();
   for (const n of parsed) {
-    if (!validSet.has(n)) continue;
+    if (valid.length && !validSet.has(n)) continue;
     if (keptSeen.has(n)) continue;
     keptSeen.add(n);
     kept.push(n);
     if (kept.length >= expectedCount) break;
   }
-  const fallback = buildFallbackLegs(valid, expectedCount);
-  for (const n of fallback) {
-    if (kept.length >= expectedCount) break;
-    if (expectedCount > 1 && kept.includes(n)) continue;
-    kept.push(n);
-  }
-  const finalNos = kept.slice(0, expectedCount);
-  if (!keepOrder) finalNos.sort((a, b) => a - b);
+  if (kept.length < expectedCount) return { normalizedCombo: null, changed: true };
+  const finalNos = keepOrder ? kept.slice() : [...kept].sort((a, b) => a - b);
   const normalizedCombo = finalNos.join("-");
-  // For unordered products, "7-4-5" and "4-5-7" are the same pick — only flag
-  // a real substitution, not a re-ordering.
   const originalKey = keepOrder
-    ? parsed.join("-")
-    : [...parsed].sort((a, b) => a - b).join("-");
-  const finalKey = keepOrder ? normalizedCombo : [...finalNos].sort((a, b) => a - b).join("-");
-  const changed = finalKey !== originalKey;
-  return { normalizedCombo, changed };
+    ? parsed.filter((n) => !valid.length || validSet.has(n)).slice(0, expectedCount).join("-")
+    : [...parsed.filter((n) => !valid.length || validSet.has(n))]
+        .sort((a, b) => a - b)
+        .slice(0, expectedCount)
+        .join("-");
+  return { normalizedCombo, changed: normalizedCombo !== originalKey };
 }
 
 function markSystemFix(row) {
@@ -141,29 +121,10 @@ function markSystemFix(row) {
   };
 }
 
-function pickUniquePair(validHorseNos, usedCombos) {
-  const valid = normalizeHorseNos(validHorseNos);
-  for (let i = 0; i < valid.length; i++) {
-    for (let j = i + 1; j < valid.length; j++) {
-      const combo = `${Math.min(valid[i], valid[j])}-${Math.max(valid[i], valid[j])}`;
-      if (!usedCombos.has(combo)) return combo;
-    }
-  }
-  return null;
-}
-
-function pickUniqueSingle(validHorseNos, usedCombos) {
-  for (const n of normalizeHorseNos(validHorseNos)) {
-    const combo = String(n);
-    if (!usedCombos.has(combo)) return combo;
-  }
-  return null;
-}
-
 const pickRow = z.object({
   combo: z.string().min(1),
   odds: z.string().optional().default(""),
-  ev_status: z.enum(["positive", "negative"]).default("positive"),
+  ev_status: z.enum(["positive", "negative"]).default("negative"),
   reason_zh: z.string().min(1),
   reason_en: z.string().min(1),
 });
@@ -171,14 +132,13 @@ const pickRow = z.object({
 export const councilPicksSchema = z.object({
   summary_zh: z.string().min(1),
   summary_en: z.string().min(1),
-  qpl: z.array(pickRow).length(3),
+  qpl: z.array(pickRow).max(3),
   others: z
     .array(
       pickRow.extend({
         product: z.enum(COUNCIL_PRODUCTS),
       })
     )
-    .min(2)
     .max(6),
   confidence: z.number().min(0).max(1).optional().default(0.5),
   data_freshness: z.string().min(1).optional().default("snapshot"),
@@ -193,80 +153,34 @@ export function parseCouncilPicks(raw, validHorseNos = []) {
 
   // Track combos across rows so corrections and fallbacks never repeat the same pair.
   const usedQplCombos = new Set();
-  const qpl = rawQpl.slice(0, 3).map((r) => {
-    const row = normalizePickRow(r);
+  const qpl = [];
+  for (const raw of rawQpl.slice(0, 3)) {
+    const row = normalizePickRow(raw);
     const checked = sanitizeCombo(row.combo, validHorseNos, 2);
-    let combo = checked.normalizedCombo;
-    let changed = checked.changed;
-    if (usedQplCombos.has(combo)) {
-      const alt = pickUniquePair(validHorseNos, usedQplCombos);
-      if (alt) {
-        combo = alt;
-        changed = true;
-      }
-    }
-    usedQplCombos.add(combo);
-    if (!changed) return { ...row, combo };
-    return markSystemFix({ ...row, combo });
-  });
-  while (qpl.length < 3) {
-    const fallbackPair = sanitizeCombo("", validHorseNos, 2).normalizedCombo;
-    const combo = pickUniquePair(validHorseNos, usedQplCombos) ?? fallbackPair;
-    usedQplCombos.add(combo);
-    qpl.push({
-      combo,
-      odds: "",
-      ev_status: "positive",
-      reason_zh: "等待議會共識",
-      reason_en: "Awaiting council consensus",
-    });
+    if (!checked.normalizedCombo || usedQplCombos.has(checked.normalizedCombo)) continue;
+    usedQplCombos.add(checked.normalizedCombo);
+    qpl.push(checked.changed ? markSystemFix({ ...row, combo: checked.normalizedCombo }) : { ...row, combo: checked.normalizedCombo });
   }
 
   const usedOtherCombos = new Set();
-  const others = rawOthers.slice(0, 6).map((r) => {
-    const row = normalizePickRow(r, "WIN");
+  const others = [];
+  for (const raw of rawOthers.slice(0, 6)) {
+    const row = normalizePickRow(raw, "WIN");
     const legCount = expectedLegCount(row.product, 2);
     const checked = sanitizeCombo(row.combo, validHorseNos, legCount, isOrderedProduct(row.product));
-    let combo = checked.normalizedCombo;
-    let changed = checked.changed;
-    const comboKey = `${row.product}|${combo}`;
-    if (usedOtherCombos.has(comboKey)) {
-      const alt = legCount === 1
-        ? pickUniqueSingle(validHorseNos, new Set([...usedOtherCombos].map((k) => k.split("|")[1])))
-        : pickUniquePair(validHorseNos, new Set([...usedOtherCombos].map((k) => k.split("|")[1])));
-      if (alt) {
-        combo = alt;
-        changed = true;
-      }
-    }
-    usedOtherCombos.add(`${row.product}|${combo}`);
-    if (!changed) return { ...row, combo };
-    return markSystemFix({ ...row, combo });
-  });
-  while (others.length < 2) {
-    const product = others.length === 0 ? "WIN" : "QIN";
-    const legCount = expectedLegCount(product, 2);
-    const usedPlain = new Set([...usedOtherCombos].map((k) => k.split("|")[1]));
-    const combo = legCount === 1
-      ? (pickUniqueSingle(validHorseNos, usedPlain) ?? sanitizeCombo("", validHorseNos, 1).normalizedCombo)
-      : (pickUniquePair(validHorseNos, usedPlain) ?? sanitizeCombo("", validHorseNos, 2).normalizedCombo);
-    usedOtherCombos.add(`${product}|${combo}`);
-    others.push({
-      combo,
-      odds: "",
-      ev_status: "positive",
-      reason_zh: "等待議會共識",
-      reason_en: "Awaiting council consensus",
-      product,
-    });
+    const comboKey = `${row.product}|${checked.normalizedCombo}`;
+    if (!checked.normalizedCombo || usedOtherCombos.has(comboKey)) continue;
+    usedOtherCombos.add(comboKey);
+    others.push(checked.changed ? markSystemFix({ ...row, combo: checked.normalizedCombo }) : { ...row, combo: checked.normalizedCombo });
   }
 
   const confidenceNum = Number(obj.confidence ?? 0.5);
   const confidence = Number.isFinite(confidenceNum) ? Math.min(1, Math.max(0, confidenceNum)) : 0.5;
+  const emptySlip = qpl.length === 0 && others.length === 0;
 
   const normalized = {
-    summary_zh: toText(obj.summary_zh ?? obj.summaryZh ?? obj.summary, "暫無最終結論"),
-    summary_en: toText(obj.summary_en ?? obj.summaryEn ?? obj.summary, "No final summary yet"),
+    summary_zh: emptySlip ? "本輪無正期望值" : toText(obj.summary_zh ?? obj.summaryZh ?? obj.summary, "暫無最終結論"),
+    summary_en: emptySlip ? "No positive-EV bet this round." : toText(obj.summary_en ?? obj.summaryEn ?? obj.summary, "No final summary yet"),
     qpl,
     others,
     confidence,

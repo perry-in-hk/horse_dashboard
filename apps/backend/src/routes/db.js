@@ -15,6 +15,7 @@ const TABLE_ALLOWLIST = new Set([
   "hkjc_council_sessions",
   "hkjc_council_messages",
   "hkjc_council_picks",
+  "hkjc_council_settlements",
   "dashboard_users",
 ]);
 

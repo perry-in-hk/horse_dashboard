@@ -65,6 +65,19 @@ interface CouncilPicks {
     round_no?: number;
   };
 }
+interface ScorecardSummary {
+  lines: number;
+  hits: number;
+  misses: number;
+  hit_pct: number | null;
+  unit_return_sum: number | null;
+  avg_confidence_hit: number | null;
+  avg_confidence_miss: number | null;
+}
+interface ScorecardPayload {
+  races: Array<{ race_no: number; summary: ScorecardSummary }>;
+  totals: ScorecardSummary;
+}
 
 interface CouncilSessionRow {
   session_id: number;
@@ -315,6 +328,7 @@ export default function AiRecommendation() {
     roundMinGapMs: 30_000,
   });
   const [raceResults, setRaceResults] = useState<RaceResultsPayload | null>(null);
+  const [scorecard, setScorecard] = useState<ScorecardPayload | null>(null);
   const [raceResultsBusy, setRaceResultsBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const now = useNowTick(1000);
@@ -469,6 +483,7 @@ export default function AiRecommendation() {
     setPendingUserReply(false);
     setTypingState(null);
     setRaceResults(null);
+    setScorecard(null);
     setRaceResultsBusy(false);
     setExportBusy(false);
     setCadence({
@@ -508,6 +523,21 @@ export default function AiRecommendation() {
     },
     [raceKey, selectedRace?.status]
   );
+
+  const loadScorecard = useCallback(() => {
+    if (!raceKey) return Promise.resolve();
+    return apiFetch<ScorecardPayload>(
+      `/api/council/scorecard?meeting_date=${encodeURIComponent(raceKey.meeting_date)}&venue_code=${encodeURIComponent(
+        raceKey.venue_code
+      )}&limit=12`
+    )
+      .then((card) => setScorecard(card))
+      .catch(() => setScorecard(null));
+  }, [raceKey]);
+
+  useEffect(() => {
+    loadScorecard().catch(() => {});
+  }, [loadScorecard, raceResults?.status]);
 
   useEffect(() => {
     if (!raceEnded || !raceKey) return;
@@ -1293,7 +1323,7 @@ export default function AiRecommendation() {
                     {qplRows.map((r, i) => renderPickRow(r, `qpl-${i}`, false))}
                   </ul>
                 ) : (
-                  <p className="ai-council-picks-empty muted">本輪尚未有 QPL 建議</p>
+                  <p className="ai-council-picks-empty muted">沒有通過期望值門檻的位置Q</p>
                 )}
               </section>
 
@@ -1304,7 +1334,7 @@ export default function AiRecommendation() {
                     {otherRows.map((r, i) => renderPickRow(r, `other-${i}`, true))}
                   </ul>
                 ) : (
-                  <p className="ai-council-picks-empty muted">本輪尚未有其他彩池建議</p>
+                  <p className="ai-council-picks-empty muted">沒有通過期望值門檻的獨贏、位置或連贏</p>
                 )}
               </section>
             </div>
@@ -1314,6 +1344,49 @@ export default function AiRecommendation() {
               <p className="muted">議會開始後，每輪總結會顯示於此。</p>
             </div>
           )}
+
+          <section className="ai-council-results-section" aria-label="記分卡">
+            <header className="ai-council-results-header">
+              <h4 className="ai-council-picks-section-title">記分卡</h4>
+            </header>
+            {!scorecard || !scorecard.totals?.lines ? (
+              <p className="ai-council-picks-empty muted">本賽馬日尚未有可結算注單。</p>
+            ) : (
+              <>
+                <div className="ai-council-scorecard">
+                  <div className="ai-council-scorecard-stat">
+                    <span>命中</span>
+                    <strong>
+                      {scorecard.totals.hits}/{scorecard.totals.lines}
+                      {scorecard.totals.hit_pct != null ? ` · ${scorecard.totals.hit_pct}%` : ""}
+                    </strong>
+                  </div>
+                  <div className="ai-council-scorecard-stat">
+                    <span>單位回報</span>
+                    <strong>{scorecard.totals.unit_return_sum ?? "—"}</strong>
+                  </div>
+                  <div className="ai-council-scorecard-stat">
+                    <span>命中注信心</span>
+                    <strong>{scorecard.totals.avg_confidence_hit ?? "—"}</strong>
+                  </div>
+                  <div className="ai-council-scorecard-stat">
+                    <span>落空注信心</span>
+                    <strong>{scorecard.totals.avg_confidence_miss ?? "—"}</strong>
+                  </div>
+                </div>
+                {scorecard.races?.length ? (
+                  <p className="ai-council-picks-empty muted">
+                    {scorecard.races
+                      .map((race) => {
+                        const s = race.summary;
+                        return `第 ${race.race_no} 場 ${s.hits}/${s.lines}`;
+                      })
+                      .join(" · ")}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </section>
 
           {raceEnded || raceResultsBusy || raceResults != null ? (
             <section className="ai-council-results-section" aria-label="正式賽果">

@@ -1,6 +1,7 @@
 import { COUNCIL_AGENTS, COUNCIL_AGENT_ORDER, STAGE2_REVIEW_PROMPT } from "./agents.js";
 import { callAgentChat } from "./callAgent.js";
 import { parseCouncilPicks } from "./picksSchema.js";
+import { applyEdgeGate } from "../pricingCard.js";
 import { formatHktDateTime, toUtcIso } from "../../timeHkt.js";
 
 function truncateText(s, max = 16000) {
@@ -26,18 +27,25 @@ function buildRunnersTable(context) {
   if (!runners.length) return "- (no runners)";
   const win = context?.oddsSummary?.win ?? {};
   const pla = context?.oddsSummary?.pla ?? {};
+  const meta = context?.raceMeta ?? {};
+  const header = `場地 ${meta.venue ?? "缺"} | 途程 ${meta.distance ?? "缺"} | 班次 ${meta.raceClass ?? "缺"} | 場地狀況 ${meta.going ?? "缺"} | 出賽 ${runners.length}`;
   const rows = [...runners]
     .map((r) => ({
       no: parseHorseNo(r?.no ?? r?.horseNo ?? r?.number),
       name: String(r?.horse_name ?? r?.name ?? r?.horseName ?? "?").trim(),
+      draw: r?.draw ?? "缺",
+      jockey: r?.jockey ?? "缺",
+      trainer: r?.trainer ?? "缺",
+      weight: r?.weight ?? "缺",
+      rating: r?.rating ?? "缺",
     }))
     .filter((r) => r.no != null)
     .sort((a, b) => a.no - b.no)
     .map((r) => {
       const key = String(r.no);
-      return `#${r.no} ${r.name} | WIN ${fmtOdds(win[key])} | PLA ${fmtOdds(pla[key])}`;
+      return `#${r.no} ${r.name} | 檔 ${r.draw} | 騎 ${r.jockey} | 練 ${r.trainer} | 負磅 ${r.weight} | 評分 ${r.rating} | WIN ${fmtOdds(win[key])} | PLA ${fmtOdds(pla[key])}`;
     });
-  return rows.length ? rows.join("\n") : "- (no runners)";
+  return [header, ...(rows.length ? rows : ["- (no runners)"])].join("\n");
 }
 
 function buildPairPoolsText(context) {
@@ -128,6 +136,8 @@ function buildContextText(context) {
       "",
       "### FormByHorseSummary",
       buildFormSummary(context),
+      "",
+      "定價卡與賽事卡在 system 開頭。只可引用該處數字；樣本不足不可自填百分比。",
       "",
       "### OddsMomentum",
       context.oddsMomentumBlock ?? "",
@@ -220,28 +230,26 @@ function buildValidHorseNos(context) {
   return withOdds;
 }
 
-function buildFallbackPicks(context) {
-  const nums = (context?.runners ?? [])
-    .map((r) => Number.parseInt(String(r?.horseNo ?? r?.no ?? r?.number ?? 0), 10))
-    .filter((n) => Number.isFinite(n) && n > 0)
-    .slice(0, 4);
-  const uniq = [...new Set(nums)];
-  const [a, b, c, d] = [uniq[0] ?? 1, uniq[1] ?? 2, uniq[2] ?? 3, uniq[3] ?? 4];
-  const mk = (x, y) => `${Math.min(x, y)}-${Math.max(x, y)}`;
+function sharedCardPrefix(context) {
+  return [context?.handicapBlock, context?.pricingBlock].filter((part) => String(part ?? "").trim()).join("\n\n");
+}
+
+function fieldSizeOf(context) {
+  return Array.isArray(context?.runners) ? context.runners.length : 0;
+}
+
+function gatePicks(picks, context) {
+  return applyEdgeGate(picks, context?.pricing ?? [], fieldSizeOf(context));
+}
+
+function buildFallbackPicks() {
   return {
-    summary_zh: "Bookie JSON 輸出異常，已採用保底建議（請人工覆核）。",
-    summary_en: "Bookie JSON output invalid; fallback picks applied (manual review advised).",
-    qpl: [
-      { combo: mk(a, b), odds: "", ev_status: "positive", reason_zh: "保底配對 1", reason_en: "Fallback pair 1" },
-      { combo: mk(a, c), odds: "", ev_status: "positive", reason_zh: "保底配對 2", reason_en: "Fallback pair 2" },
-      { combo: mk(b, c), odds: "", ev_status: "positive", reason_zh: "保底配對 3", reason_en: "Fallback pair 3" },
-    ],
-    others: [
-      { product: "WIN", combo: String(a), odds: "", ev_status: "positive", reason_zh: "保底獨贏", reason_en: "Fallback WIN" },
-      { product: "QIN", combo: mk(a, d), odds: "", ev_status: "positive", reason_zh: "保底位置Q", reason_en: "Fallback QIN" },
-    ],
+    summary_zh: "本輪無正期望值",
+    summary_en: "No positive-EV bet this round.",
+    qpl: [],
+    others: [],
     confidence: 0.2,
-    data_freshness: "fallback",
+    data_freshness: "no_edge",
     updated_at_utc: "",
     updated_at_hkt: "",
   };
@@ -273,9 +281,6 @@ function normalizeSequence(raw) {
     out.push(code);
   }
   if (!out.length) return COUNCIL_AGENT_ORDER.slice();
-  for (const code of COUNCIL_AGENT_ORDER) {
-    if (!seen.has(code)) out.push(code);
-  }
   return out;
 }
 
@@ -347,7 +352,7 @@ function buildAnalystTurnPrompt({
     `當前回合: Round ${roundNo}, Turn ${turnNo}, Speaker: ${speakerCode}`,
     previousSpeaker ? `上一位發言者: ${previousSpeaker}` : "上一位發言者: 無",
     ...chairBlock,
-    "請以會議對話口吻，控制在 4-12 句，務實具體，避免超長報告。",
+    "請以會議對話口吻，最多 4 句、約 180 字。只引用 system 開頭的定價卡或賽事卡。",
     "反重複硬性規則（違反即視為失職）：",
     "1) MeetingTranscript 中你自己之前講過的內容一律不可複述（包括開場白、同一組賠率、同一段近績）。",
     "2) 本輪只講增量：a) 自上一輪以來的數據變化（賠率、動量、新訊號）；b) 一個新觀點，或對其他成員的具體質疑/反駁；c) 更新後的組合建議。",
@@ -356,7 +361,7 @@ function buildAnalystTurnPrompt({
     "你必須：",
     "1) 推進討論（使用者發言由 Kelly 回應，不要代答）",
     "2) 回應上一位分析師的關鍵觀點（若有）",
-    "3) 提供你對下一步可執行建議（QPL/其他池方向）",
+    "3) 指出定價卡可能高估或低估的一匹馬，或寫「同意定價卡、無新增」",
     "",
     ...userBlock,
     "",
@@ -417,21 +422,15 @@ function buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }
     latest_user_seq: Number.isFinite(Number(latestUserSeq)) ? Number(latestUserSeq) : -1,
     next_sequence: ["quant", "historian", "trend", "scout"],
     current_picks: {
-      summary_zh: "主推 QPL 組合，並覆蓋 WIN/PLA/QIN/FCT/TRI 各一注。",
-      summary_en: "Primary QPL combos with WIN/PLA/QIN/FCT/TRI coverage.",
+      summary_zh: "只保留定價卡 edge 為正的注。沒有則留空。",
+      summary_en: "Keep only positive-edge bets. Leave empty otherwise.",
       qpl: [
-        { combo: mk(a, b), odds: "6.5", ev_status: "positive", reason_zh: "賠率支持且近況佳", reason_en: "Odds support and good recent form" },
-        { combo: mk(a, c), odds: "9.2", ev_status: "neutral", reason_zh: "次選配對", reason_en: "Secondary pair" },
-        { combo: mk(b, c), odds: "11.0", ev_status: "neutral", reason_zh: "防冷配對", reason_en: "Cover pair" },
+        { combo: mk(a, b), odds: "6.5", ev_status: "positive", reason_zh: `#${a} #${b} 定價卡 edge 為正`, reason_en: "Pricing card edge is positive" },
       ],
       others: [
-        { product: "WIN", combo: String(a), odds: "3.4", ev_status: "positive", reason_zh: "#馬號 大熱可信", reason_en: "Reliable favourite" },
-        { product: "PLA", combo: String(b), odds: "2.1", ev_status: "positive", reason_zh: "#馬號 位置穩定", reason_en: "Consistent placer" },
-        { product: "QIN", combo: mk(a, d), odds: "18.0", ev_status: "neutral", reason_zh: "搏冷", reason_en: "Value longshot" },
-        { product: "FCT", combo: `${a}-${b}`, odds: "12.0", ev_status: "neutral", reason_zh: "順序二重彩：#前者先入", reason_en: "Forecast with leader first" },
-        { product: "TRI", combo: [a, b, c].join("-"), odds: "30.0", ev_status: "neutral", reason_zh: "三匹入三甲組合", reason_en: "Trio of top-three candidates" },
+        { product: "WIN", combo: String(a), odds: "3.4", ev_status: "positive", reason_zh: `#${a} 定價卡 edge 為正`, reason_en: "Pricing card edge is positive" },
       ],
-      confidence: 0.62,
+      confidence: 0.42,
       data_freshness: "realtime",
     },
     is_final: Boolean(shouldFinalize),
@@ -487,8 +486,8 @@ function buildBookieRoundPrompt({
     buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }),
     "",
     `combo 只能使用本場合法馬號：${(validHorseNos ?? []).join(", ") || "(見 RunnersTable)"}。`,
-    "qpl 三筆 combo 不可重複。",
-    "others 需 4-5 筆、每筆 product 不同，覆蓋至少 4 種產品（WIN/PLA/QIN/FCT/TCE/TRI/FF/QTT/DBL 中挑選）；腳數：WIN/PLA=1、QIN/QPL/DBL/FCT=2、TCE/TRI=3、FF/QTT=4；FCT/TCE/QTT 順序即名次。",
+    "qpl 最多 3 筆且 combo 不可重複；沒有正期望值就留空陣列。",
+    "others 最多 4 筆，只可使用 WIN/PLA/QIN/QPL。沒有正期望值就留空。禁止為了覆蓋彩池而加注。",
     "member_verdicts 必須涵蓋本輪每位有發言的成員；重複舊內容或空白發言一律 reject。",
     "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。",
     "directives 給每位成員的任務要具體到「查哪個數據、答哪個問題」，禁止空泛的「繼續觀察」。",
@@ -535,8 +534,10 @@ export async function runCouncilChatroomRound(input) {
     chairDirectives = null,
     chairRuling = null,
     previousConfidence = null,
+    skipAnalysts = false,
     onEvent,
   } = input;
+  const sharedPrefix = sharedCardPrefix(context);
   const directiveByAgent = new Map();
   for (const d of Array.isArray(chairDirectives) ? chairDirectives : []) {
     const code = String(d?.agent ?? "").trim().toLowerCase();
@@ -549,7 +550,7 @@ export async function runCouncilChatroomRound(input) {
     }
   };
 
-  const seq = normalizeSequence(sequence);
+  const seq = skipAnalysts ? [] : normalizeSequence(sequence);
   const workingTranscript = [...(Array.isArray(transcript) ? transcript : [])];
   const analystTurns = [];
   let previousSpeaker = null;
@@ -585,6 +586,7 @@ export async function runCouncilChatroomRound(input) {
       model: agent.model,
       temperature: agent.temperature,
       max_tokens: agent.max_tokens,
+      sharedPrefix,
     });
     const turn = {
       round_no: roundNo,
@@ -666,6 +668,7 @@ export async function runCouncilChatroomRound(input) {
         model: kellyAgent.model,
         temperature: kellyAgent.temperature,
         max_tokens: kellyAgent.max_tokens,
+        sharedPrefix,
       });
       const relayMatch = String(kellyOut.text ?? "").match(KELLY_RELAY_RE);
       kellyRelay = relayMatch ? relayMatch[1].trim() : "";
@@ -731,6 +734,8 @@ export async function runCouncilChatroomRound(input) {
     temperature: COUNCIL_AGENTS.bookie.temperature,
     max_tokens: COUNCIL_AGENTS.bookie.max_tokens,
     jsonMode: true,
+    sharedPrefix,
+    finalChair: shouldFinalize,
   });
   let bookieObj = parseJsonSafe(bookieRaw.text);
   if (!bookieObj) {
@@ -741,12 +746,14 @@ export async function runCouncilChatroomRound(input) {
       temperature: COUNCIL_AGENTS.bookie.temperature,
       max_tokens: COUNCIL_AGENTS.bookie.max_tokens,
       jsonMode: true,
+      sharedPrefix,
+      finalChair: shouldFinalize,
     });
     bookieObj = parseJsonSafe(bookieRaw.text) ?? {};
   }
 
   const picksParsed = parseCouncilPicks(bookieObj?.current_picks ?? bookieObj?.picks ?? {}, validHorseNos);
-  const currentPicks = picksParsed.success ? picksParsed.data : buildFallbackPicks(context);
+  const currentPicks = picksParsed.success ? gatePicks(picksParsed.data, context) : buildFallbackPicks();
   const roundSummaryZh = String(bookieObj?.round_summary_zh ?? currentPicks.summary_zh ?? "本輪總結：暫無。").trim();
   const roundSummaryEn = String(bookieObj?.round_summary_en ?? currentPicks.summary_en ?? "Round summary unavailable.").trim();
   // When picks fell back (or lack a summary), reuse the round summary so the
@@ -829,6 +836,7 @@ export async function runCouncilRound(input) {
         model: agent.model,
         temperature: agent.temperature,
         max_tokens: agent.max_tokens,
+        sharedPrefix: sharedCardPrefix(context),
       });
       return {
         agent_code: code,
@@ -865,6 +873,7 @@ export async function runCouncilRound(input) {
         model: agent.model,
         temperature: Math.max(agent.temperature, 0.1),
         max_tokens: 1200,
+        sharedPrefix: sharedCardPrefix(context),
       });
       const parsed = parseRankingFromText(out.text);
       return {
@@ -886,7 +895,7 @@ export async function runCouncilRound(input) {
   const bookiePrompt = [
     "請你作為 Bookie 輸出最終推薦。",
     "你必須輸出嚴格 JSON（不要 markdown）。",
-    "需求：qpl 3 筆 + others 2 筆，others 的 product 必須在允許列表。",
+    "只輸出定價卡 edge 過門檻的注。qpl 與 others 可以是空陣列。沒有正期望值時 summary 寫「本輪無正期望值」。",
     "",
     "### Stage1",
     stage1Text,
@@ -905,6 +914,8 @@ export async function runCouncilRound(input) {
     temperature: COUNCIL_AGENTS.bookie.temperature,
     max_tokens: COUNCIL_AGENTS.bookie.max_tokens,
     jsonMode: true,
+    sharedPrefix: sharedCardPrefix(context),
+    finalChair: true,
   });
 
   let parsedObj = null;
@@ -920,6 +931,8 @@ export async function runCouncilRound(input) {
       temperature: COUNCIL_AGENTS.bookie.temperature,
       max_tokens: COUNCIL_AGENTS.bookie.max_tokens,
       jsonMode: true,
+      sharedPrefix: sharedCardPrefix(context),
+      finalChair: true,
     });
     try {
       parsedObj = JSON.parse(stage3.text);
@@ -931,7 +944,7 @@ export async function runCouncilRound(input) {
 
   const validHorseNos = buildValidHorseNos(context);
   const parsed = parseCouncilPicks(parsedObj, validHorseNos);
-  const parsedData = parsed.success ? parsed.data : buildFallbackPicks(context);
+  const parsedData = parsed.success ? gatePicks(parsed.data, context) : buildFallbackPicks();
   if (!parsed.success && !stage3ParseWarning) {
     stage3ParseWarning = `Bookie JSON schema mismatch: ${JSON.stringify(parsed.error.flatten()).slice(0, 500)}`;
   }

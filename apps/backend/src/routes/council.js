@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { buildCouncilExportMarkdown } from "../lib/councilExport.js";
+import { loadScorecard } from "../lib/ai/council/scorecard.js";
 import { pool } from "../db.js";
 import {
   appendUserMessage,
@@ -214,6 +215,22 @@ router.get("/meeting-history", async (_req, res) => {
     source: "history",
   }));
   res.json({ items });
+});
+
+router.get("/scorecard", async (req, res) => {
+  const parsed = raceKey
+    .partial({ race_no: true })
+    .extend({ limit: z.coerce.number().int().min(1).max(50).optional() })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+  const q = parsed.data;
+  const card = await loadScorecard(pool, {
+    meetingDate: q.meeting_date,
+    venueCode: q.venue_code,
+    raceNo: q.race_no ?? null,
+    limit: q.limit ?? 12,
+  });
+  res.json(card);
 });
 
 router.get("/export", async (req, res) => {

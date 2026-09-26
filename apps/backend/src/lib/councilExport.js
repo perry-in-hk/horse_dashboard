@@ -1,4 +1,5 @@
 import { pool } from "../db.js";
+import { settleSession } from "./ai/council/scorecard.js";
 import { getMessages } from "./councilService.js";
 import { getRaceResultsPayload } from "./raceResultIngest.js";
 
@@ -227,6 +228,31 @@ export async function buildCouncilExportMarkdown({ meetingDate, venueCode, raceN
   lines.push(`## 正式賽果`);
   lines.push("");
   lines.push(formatResultsMarkdown(results));
+
+  if (sid) {
+    lines.push(`## 記分卡`);
+    lines.push("");
+    try {
+      const settled = await settleSession(pool, sid);
+      if (!settled || settled.pending) {
+        lines.push("_賽果尚未入庫，注單未結算_");
+      } else {
+        const s = settled.summary ?? {};
+        lines.push(`- 命中：${s.hits ?? 0}/${s.lines ?? 0}${s.hit_pct != null ? `（${s.hit_pct}%）` : ""}`);
+        lines.push(`- 單位回報合計：${s.unit_return_sum ?? "—"}`);
+        lines.push(`- 命中注平均信心：${s.avg_confidence_hit ?? "—"}`);
+        lines.push(`- 落空注平均信心：${s.avg_confidence_miss ?? "—"}`);
+        lines.push("");
+        for (const line of settled.lines ?? []) {
+          const ret = line.unit_return == null ? "—" : line.unit_return;
+          lines.push(`- ${line.product} ${line.combo}：${line.outcome}，下注賠率 ${line.odds_at_pick || "—"}，結算賠率 ${line.closing_odds || "—"}，單位回報 ${ret}`);
+        }
+      }
+    } catch {
+      lines.push("_記分卡暫時無法結算_");
+    }
+    lines.push("");
+  }
 
   return {
     markdown: lines.join("\n"),
