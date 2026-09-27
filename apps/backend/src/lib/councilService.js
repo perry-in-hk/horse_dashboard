@@ -18,7 +18,11 @@ const activatedDateMem = new Set();
 const dateKey = (meetingDate) => `council:activated:${meetingDate}`;
 const COUNCIL_MODE = String(process.env.COUNCIL_MODE ?? "chatroom").trim().toLowerCase();
 const PRE_START_CLOSE_MS = Number(process.env.COUNCIL_CLOSE_BEFORE_START_MS ?? 60 * 1000);
-const COUNCIL_MAX_ROUNDS = Math.max(1, Number(process.env.COUNCIL_MAX_ROUNDS ?? 3) || 3);
+const MAX_ROUNDS_MIN = 1;
+const MAX_ROUNDS_MAX = 12;
+const maxRoundsKey = "council:max_rounds";
+/** @type {number | null} */
+let maxRoundsMem = null;
 const ROUND_GAP_DEFAULT_MS = Number(
   process.env.COUNCIL_ROUND_MIN_GAP_MS ?? process.env.COUNCIL_ROUND_INTERVAL_MS ?? 30 * 1000
 );
@@ -48,6 +52,58 @@ export async function hydrateRoundGapFromRedis() {
 export async function getRoundMinGapMs() {
   if (roundGapMsMem != null) return roundGapMsMem;
   return hydrateRoundGapFromRedis();
+}
+
+function clampMaxRounds(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < MAX_ROUNDS_MIN || n > MAX_ROUNDS_MAX) return null;
+  return n;
+}
+
+function defaultMaxRounds() {
+  const raw = process.env.COUNCIL_MAX_ROUNDS ?? process.env.COUNCIL_MAX_ROUNDS_PER_RACE ?? 3;
+  return clampMaxRounds(raw) ?? 3;
+}
+
+export function getMaxRoundsSync() {
+  return maxRoundsMem ?? defaultMaxRounds();
+}
+
+export async function hydrateMaxRoundsFromRedis() {
+  const redis = await getRedisClient().catch(() => null);
+  if (!redis) return getMaxRoundsSync();
+  const v = await redis.get(maxRoundsKey).catch(() => null);
+  const n = clampMaxRounds(v);
+  if (n != null) maxRoundsMem = n;
+  return getMaxRoundsSync();
+}
+
+export function getMaxRoundsBounds() {
+  return {
+    min: MAX_ROUNDS_MIN,
+    max: MAX_ROUNDS_MAX,
+    default: defaultMaxRounds(),
+  };
+}
+
+/** Live cap for rounds per race. Stored in Redis so the AI page can change it without a restart. */
+export async function setMaxRounds(rounds, userId = null) {
+  const n = clampMaxRounds(rounds);
+  if (n == null) {
+    const err = new Error(`每場輪數須介於 ${MAX_ROUNDS_MIN} 與 ${MAX_ROUNDS_MAX}`);
+    err.status = 400;
+    throw err;
+  }
+  maxRoundsMem = n;
+  const redis = await getRedisClient().catch(() => null);
+  if (redis) await redis.set(maxRoundsKey, String(n)).catch(() => {});
+  emit("max_rounds_update", {
+    max_rounds: n,
+    max_rounds_bounds: getMaxRoundsBounds(),
+    updated_by_user_id: userId,
+    updated_at_hkt: formatHktDateTime(),
+  });
+  return n;
 }
 
 export function getRoundGapBounds() {
@@ -429,8 +485,9 @@ async function findResumableSession(meetingDate, venueCode, raceNo) {
   );
   const s = rows[0];
   if (!s) return null;
-  // Only a manual stop can be resumed; finalized / race-ended sessions stay closed.
-  if (String(s.stop_reason ?? "") !== "manual_stop") return null;
+  const reason = String(s.stop_reason ?? "");
+  // Manual pause, or a round-cap close that can continue once the cap is raised.
+  if (reason !== "manual_stop" && reason !== "max_rounds") return null;
   return s;
 }
 
@@ -501,13 +558,24 @@ export async function startCouncilSession({ meetingDate, venueCode, raceNo, trig
   // user's explicit stop.
   const resumable = await findResumableSession(meetingDate, venueCode, raceNo);
   if (resumable) {
+    const stopReason = String(resumable.stop_reason ?? "");
+    const progressPreview = await loadResumeProgress(resumable.id);
     if (trigger !== "manual") {
-      const err = new Error("本場會議已被手動停止，僅手動啟動可恢復");
+      const err = new Error(
+        stopReason === "max_rounds"
+          ? "本場已達輪數上限，不會自動續談"
+          : "本場會議已被手動停止，僅手動啟動可恢復"
+      );
+      err.status = 409;
+      throw err;
+    }
+    if (stopReason === "max_rounds" && progressPreview.round_no >= getMaxRoundsSync()) {
+      const err = new Error("本場已達輪數上限。先調高每場輪數，再按啟動議會即可續談。");
       err.status = 409;
       throw err;
     }
     await reopenSessionRow(resumable.id);
-    const progress = await loadResumeProgress(resumable.id);
+    const progress = progressPreview;
     const state = {
       ...makeSessionStateFromRow({
         id: resumable.id,
@@ -521,11 +589,10 @@ export async function startCouncilSession({ meetingDate, venueCode, raceNo, trig
     state.next_sequence = progress.next_sequence;
     activeSessions.set(key, state);
     emit("session_state", { ...state, status: "running" });
-    await insertSystemMessage(
-      state,
-      `會議恢復：延續先前討論，下一輪 Round ${progress.round_no + 1}`,
-      { event: "session_resume" }
-    ).catch(() => {});
+    const resumeText = stopReason === "max_rounds"
+      ? `會議恢復：每場輪數已提高，下一輪 Round ${progress.round_no + 1}`
+      : `會議恢復：延續先前討論，下一輪 Round ${progress.round_no + 1}`;
+    await insertSystemMessage(state, resumeText, { event: "session_resume" }).catch(() => {});
     await armOddsSync(state);
     return state;
   }
@@ -571,7 +638,9 @@ function stopReasonSystemText(reason) {
   if (reason === "race_started") return "會議結束：賽事已開跑";
   if (reason === "race_ended") return "會議結束：賽事已結束";
   if (reason === "manual_stop") return "會議已暫停：再按「啟動議會」可延續討論";
-  if (reason === "max_rounds") return "會議結案：已達每場輪次上限，沿用最後一版注單";
+  if (reason === "max_rounds") {
+    return "會議結案：已達每場輪數，沿用最後一版注單。調高每場輪數後再按啟動議會即可續談。";
+  }
   return `會議已結束（${reason}）`;
 }
 
@@ -823,13 +892,14 @@ async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
   const transcript = await loadRecentTranscript(state.session_id, 80);
   const context = await loadContext(meetingDate, venueCode, raceNo, userMessages);
   const roundNo = Math.max(1, Number(state.round_no ?? 0) + 1);
-  if (Number(state.round_no ?? 0) >= COUNCIL_MAX_ROUNDS) {
+  const maxRounds = getMaxRoundsSync();
+  if (Number(state.round_no ?? 0) >= maxRounds) {
     await stopCouncilSession({ meetingDate, venueCode, raceNo, reason: "max_rounds" });
     return null;
   }
   const fingerprint = oddsFingerprint(context);
   const oddsUnchanged = state.last_odds_fingerprint != null && state.last_odds_fingerprint === fingerprint;
-  const closing = shouldFinalize || roundNo >= COUNCIL_MAX_ROUNDS;
+  const closing = shouldFinalize || roundNo >= maxRounds;
   const skipAnalysts = oddsUnchanged && !pendingUserMessages.length && Number(state.round_no ?? 0) >= 1;
   if (skipAnalysts && !closing) {
     state.last_odds_fingerprint = fingerprint;
@@ -1099,6 +1169,8 @@ export async function getCouncilStatus({ meetingDate, venueCode, raceNo }) {
     activated_date: activated,
     round_min_gap_ms: getRoundMinGapMsSync(),
     round_gap_bounds: getRoundGapBounds(),
+    max_rounds: getMaxRoundsSync(),
+    max_rounds_bounds: getMaxRoundsBounds(),
     active_session: active
       ? {
           session_id: active.session_id,

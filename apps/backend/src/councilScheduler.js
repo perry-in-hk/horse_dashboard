@@ -2,6 +2,7 @@ import { getHorseRacingApi } from "./lib/hkjcOddsClient.js";
 import {
   getAllActiveSessions,
   hydrateActiveSessionsFromDb,
+  hydrateMaxRoundsFromRedis,
   hydrateRoundGapFromRedis,
   ensureOddsSyncForActiveSessions,
   isDateActivated,
@@ -157,6 +158,7 @@ export function startCouncilScheduler() {
   if (timer) return () => {};
   const everyMs = envNum("COUNCIL_SCHEDULER_TICK_MS", 30_000);
   hydrateRoundGapFromRedis().catch((e) => console.warn("[councilScheduler] round gap hydrate failed:", e?.message ?? e));
+  hydrateMaxRoundsFromRedis().catch((e) => console.warn("[councilScheduler] max rounds hydrate failed:", e?.message ?? e));
   hydrateActiveSessionsFromDb().catch((e) => console.warn("[councilScheduler] hydrate failed:", e?.message ?? e));
   timer = setInterval(() => {
     tick().catch((e) => console.warn("[councilScheduler] tick error", e));

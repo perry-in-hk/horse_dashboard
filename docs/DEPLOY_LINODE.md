@@ -278,6 +278,8 @@ docker network connect horse_dashboard_default mia_ordering-caddy-1 2>/dev/null 
 
 Mia’s Caddyfile (`/home/deploy/mia_ordering/deploy/Caddyfile`) must keep the `lord-in-hk.ccwu.cc` site, including `handle /ws/council*`. Restart that Caddy only with `--env-file .env.production`, then connect the network again. Details: [`docs/linode/INCIDENT_2026-09-26.md`](linode/INCIDENT_2026-09-26.md).
 
+Rounds per race default to 3. On the AI page, **每場輪數** changes the cap immediately (1–12) and keeps it in Redis. After a meeting stops for the cap, raise the number and press **啟動議會** to continue that same meeting. `COUNCIL_MAX_ROUNDS` in `.env` is only the default before anyone changes it on the page.
+
 #### If you do not know the repo path
 
 Use these commands first:

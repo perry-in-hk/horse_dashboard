@@ -7,11 +7,14 @@ import {
   appendUserMessage,
   getCouncilStatus,
   getMessages,
+  getMaxRoundsBounds,
   getRoundGapBounds,
+  hydrateMaxRoundsFromRedis,
   hydrateRoundGapFromRedis,
   getSessionHistory,
   runCouncilRoundForRace,
   setDateActivated,
+  setMaxRounds,
   setRoundMinGapMs,
   startCouncilSession,
   stopCouncilSession,
@@ -86,6 +89,35 @@ router.post("/round-gap", async (req, res) => {
       round_min_gap_ms: ms,
       round_min_gap_seconds: Math.round(ms / 1000),
       round_gap_bounds: getRoundGapBounds(),
+    });
+  } catch (e) {
+    const status = Number(e?.status) || 500;
+    return res.status(status).json({ error: e?.message ?? "Update failed" });
+  }
+});
+
+const maxRoundsBody = z.object({
+  max_rounds: z.coerce.number().int().min(1).max(12),
+});
+
+router.get("/max-rounds", async (_req, res) => {
+  const maxRounds = await hydrateMaxRoundsFromRedis();
+  res.json({
+    ok: true,
+    max_rounds: maxRounds,
+    max_rounds_bounds: getMaxRoundsBounds(),
+  });
+});
+
+router.post("/max-rounds", async (req, res) => {
+  const parsed = maxRoundsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Bad request", details: parsed.error.flatten() });
+  try {
+    const maxRounds = await setMaxRounds(parsed.data.max_rounds, req.user?.id ?? null);
+    res.json({
+      ok: true,
+      max_rounds: maxRounds,
+      max_rounds_bounds: getMaxRoundsBounds(),
     });
   } catch (e) {
     const status = Number(e?.status) || 500;

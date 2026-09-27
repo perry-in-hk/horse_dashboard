@@ -217,6 +217,17 @@ function cadenceFromEvent(ev: WsEnvelope): CouncilCadence {
 }
 
 const ROUND_GAP_PRESETS = [15, 30, 45, 60, 90, 120];
+const MAX_ROUND_PRESETS = [3, 4, 5, 6, 8];
+
+function readMaxRoundsFromStatus(status: Record<string, unknown>) {
+  const bounds = status.max_rounds_bounds as Record<string, unknown> | undefined;
+  const value = parseNum(status.max_rounds);
+  return {
+    maxRounds: value > 0 ? value : 3,
+    minRounds: parseNum(bounds?.min) || 1,
+    maxRoundsLimit: parseNum(bounds?.max) || 12,
+  };
+}
 
 function formatNextRoundHint(cadence: CouncilCadence, nowMs: number, isTyping: boolean): string | null {
   if (!cadence.sessionRunning || cadence.finalized) return null;
@@ -321,6 +332,12 @@ export default function AiRecommendation() {
   const [roundGapMin, setRoundGapMin] = useState(15);
   const [roundGapMax, setRoundGapMax] = useState(600);
   const [roundGapEditingCustom, setRoundGapEditingCustom] = useState(false);
+  const [maxRounds, setMaxRounds] = useState(3);
+  const [maxRoundsDraft, setMaxRoundsDraft] = useState("3");
+  const [maxRoundsBusy, setMaxRoundsBusy] = useState(false);
+  const [maxRoundsMin, setMaxRoundsMin] = useState(1);
+  const [maxRoundsLimit, setMaxRoundsLimit] = useState(12);
+  const [maxRoundsEditingCustom, setMaxRoundsEditingCustom] = useState(false);
   const [cadence, setCadence] = useState<CouncilCadence>({
     sessionRunning: false,
     runningRound: false,
@@ -621,6 +638,12 @@ export default function AiRecommendation() {
         setRoundGapMin(gap.minSeconds);
         setRoundGapMax(gap.maxSeconds);
         setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(gap.gapSeconds));
+        const cap = readMaxRoundsFromStatus(status);
+        setMaxRounds(cap.maxRounds);
+        setMaxRoundsDraft(String(cap.maxRounds));
+        setMaxRoundsMin(cap.minRounds);
+        setMaxRoundsLimit(cap.maxRoundsLimit);
+        setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
         const activeSession = (status.active_session as Record<string, unknown> | null) ?? null;
         const running = Boolean(activeSession?.session_id);
         if (running && parseNum(activeSession?.session_id) > 0) {
@@ -691,6 +714,17 @@ export default function AiRecommendation() {
       if (ms > 0) setCadence((prev) => ({ ...prev, roundMinGapMs: ms }));
       return;
     }
+    if (ev.type === "max_rounds_update") {
+      const cap = readMaxRoundsFromStatus(ev as Record<string, unknown>);
+      if (parseNum(ev.max_rounds) > 0) {
+        setMaxRounds(cap.maxRounds);
+        setMaxRoundsDraft(String(cap.maxRounds));
+        setMaxRoundsMin(cap.minRounds);
+        setMaxRoundsLimit(cap.maxRoundsLimit);
+        setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
+      }
+      return;
+    }
     if (ev.type === "picks_update") {
       const p = (ev.picks as CouncilPicks | undefined) ?? null;
       if (p) setPicks(p);
@@ -736,6 +770,12 @@ export default function AiRecommendation() {
           setRoundGapMin(gap.minSeconds);
           setRoundGapMax(gap.maxSeconds);
           setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(gap.gapSeconds));
+          const cap = readMaxRoundsFromStatus(status);
+          setMaxRounds(cap.maxRounds);
+          setMaxRoundsDraft(String(cap.maxRounds));
+          setMaxRoundsMin(cap.minRounds);
+          setMaxRoundsLimit(cap.maxRoundsLimit);
+          setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
           const activeSession = (status.active_session as Record<string, unknown> | null) ?? null;
           const sid = parseNum(activeSession?.session_id);
           if (sid > 0) setSessionId((prev) => prev ?? sid);
@@ -797,6 +837,31 @@ export default function AiRecommendation() {
         .finally(() => setRoundGapBusy(false));
     },
     [roundGapMin, roundGapMax]
+  );
+
+  const applyMaxRounds = useCallback(
+    (rounds: number) => {
+      const clamped = Math.min(maxRoundsLimit, Math.max(maxRoundsMin, Math.round(rounds)));
+      if (!Number.isFinite(clamped)) return;
+      setMaxRoundsBusy(true);
+      apiFetch<{ ok: boolean; max_rounds: number; max_rounds_bounds?: Record<string, unknown> }>(
+        "/api/council/max-rounds",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ max_rounds: clamped }),
+        }
+      )
+        .then((r) => {
+          const cap = readMaxRoundsFromStatus(r as Record<string, unknown>);
+          setMaxRounds(cap.maxRounds);
+          setMaxRoundsDraft(String(cap.maxRounds));
+          setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
+        })
+        .catch((e: Error) => setManualError(e.message))
+        .finally(() => setMaxRoundsBusy(false));
+    },
+    [maxRoundsMin, maxRoundsLimit]
   );
 
   const stopCouncil = useCallback(() => {
@@ -901,6 +966,9 @@ export default function AiRecommendation() {
       ? String(roundGapSeconds)
       : "custom";
   const showCustomGapEditor = roundGapEditingCustom || !ROUND_GAP_PRESETS.includes(roundGapSeconds);
+  const maxRoundsSelectValue =
+    MAX_ROUND_PRESETS.includes(maxRounds) && !maxRoundsEditingCustom ? String(maxRounds) : "custom";
+  const showCustomMaxRoundsEditor = maxRoundsEditingCustom || !MAX_ROUND_PRESETS.includes(maxRounds);
 
   return (
     <div className="ai-rec-page">
@@ -1065,6 +1133,62 @@ export default function AiRecommendation() {
                       className="btn btn-ghost ai-council-interval-apply"
                       disabled={roundGapBusy}
                       onClick={() => applyRoundGap(parseNum(roundGapDraft))}
+                    >
+                      套用
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div className="ai-council-field ai-council-field-interval">
+              <label className="field-label" htmlFor="council-max-rounds">
+                每場輪數
+              </label>
+              <div className="ai-council-interval-row">
+                <select
+                  id="council-max-rounds"
+                  className="ai-council-select"
+                  value={maxRoundsSelectValue}
+                  disabled={maxRoundsBusy}
+                  title="調高後再按啟動議會，已結案的場次會接著談"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "custom") {
+                      setMaxRoundsEditingCustom(true);
+                      return;
+                    }
+                    setMaxRoundsEditingCustom(false);
+                    applyMaxRounds(Number(v));
+                  }}
+                >
+                  {MAX_ROUND_PRESETS.map((n) => (
+                    <option key={n} value={n}>
+                      {n} 輪
+                    </option>
+                  ))}
+                  <option value="custom">自訂</option>
+                </select>
+                {showCustomMaxRoundsEditor ? (
+                  <>
+                    <input
+                      type="number"
+                      className="ai-council-interval-input"
+                      min={maxRoundsMin}
+                      max={maxRoundsLimit}
+                      step={1}
+                      value={maxRoundsDraft}
+                      disabled={maxRoundsBusy}
+                      aria-label="自訂每場輪數"
+                      onChange={(e) => setMaxRoundsDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyMaxRounds(parseNum(maxRoundsDraft));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost ai-council-interval-apply"
+                      disabled={maxRoundsBusy}
+                      onClick={() => applyMaxRounds(parseNum(maxRoundsDraft))}
                     >
                       套用
                     </button>
