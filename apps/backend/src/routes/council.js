@@ -1,16 +1,20 @@
 import { Router } from "express";
 import { z } from "zod";
 import { buildCouncilExportMarkdown } from "../lib/councilExport.js";
+import { loadScorecard } from "../lib/ai/council/scorecard.js";
 import { pool } from "../db.js";
 import {
   appendUserMessage,
   getCouncilStatus,
   getMessages,
+  getMaxRoundsBounds,
   getRoundGapBounds,
+  hydrateMaxRoundsFromRedis,
   hydrateRoundGapFromRedis,
   getSessionHistory,
   runCouncilRoundForRace,
   setDateActivated,
+  setMaxRounds,
   setRoundMinGapMs,
   startCouncilSession,
   stopCouncilSession,
@@ -85,6 +89,35 @@ router.post("/round-gap", async (req, res) => {
       round_min_gap_ms: ms,
       round_min_gap_seconds: Math.round(ms / 1000),
       round_gap_bounds: getRoundGapBounds(),
+    });
+  } catch (e) {
+    const status = Number(e?.status) || 500;
+    return res.status(status).json({ error: e?.message ?? "Update failed" });
+  }
+});
+
+const maxRoundsBody = z.object({
+  max_rounds: z.coerce.number().int().min(1).max(12),
+});
+
+router.get("/max-rounds", async (_req, res) => {
+  const maxRounds = await hydrateMaxRoundsFromRedis();
+  res.json({
+    ok: true,
+    max_rounds: maxRounds,
+    max_rounds_bounds: getMaxRoundsBounds(),
+  });
+});
+
+router.post("/max-rounds", async (req, res) => {
+  const parsed = maxRoundsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Bad request", details: parsed.error.flatten() });
+  try {
+    const maxRounds = await setMaxRounds(parsed.data.max_rounds, req.user?.id ?? null);
+    res.json({
+      ok: true,
+      max_rounds: maxRounds,
+      max_rounds_bounds: getMaxRoundsBounds(),
     });
   } catch (e) {
     const status = Number(e?.status) || 500;
@@ -214,6 +247,22 @@ router.get("/meeting-history", async (_req, res) => {
     source: "history",
   }));
   res.json({ items });
+});
+
+router.get("/scorecard", async (req, res) => {
+  const parsed = raceKey
+    .partial({ race_no: true })
+    .extend({ limit: z.coerce.number().int().min(1).max(50).optional() })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+  const q = parsed.data;
+  const card = await loadScorecard(pool, {
+    meetingDate: q.meeting_date,
+    venueCode: q.venue_code,
+    raceNo: q.race_no ?? null,
+    limit: q.limit ?? 12,
+  });
+  res.json(card);
 });
 
 router.get("/export", async (req, res) => {

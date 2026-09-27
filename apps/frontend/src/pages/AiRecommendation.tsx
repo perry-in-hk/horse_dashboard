@@ -65,6 +65,20 @@ interface CouncilPicks {
     round_no?: number;
   };
 }
+interface ScorecardSummary {
+  lines: number;
+  hits: number;
+  misses: number;
+  hit_pct: number | null;
+  unit_return_sum: number | null;
+  avg_confidence_hit: number | null;
+  avg_confidence_miss: number | null;
+  suggestion?: ScorecardSummary;
+}
+interface ScorecardPayload {
+  races: Array<{ race_no: number; summary: ScorecardSummary }>;
+  totals: ScorecardSummary;
+}
 
 interface CouncilSessionRow {
   session_id: number;
@@ -203,6 +217,17 @@ function cadenceFromEvent(ev: WsEnvelope): CouncilCadence {
 }
 
 const ROUND_GAP_PRESETS = [15, 30, 45, 60, 90, 120];
+const MAX_ROUND_PRESETS = [3, 4, 5, 6, 8];
+
+function readMaxRoundsFromStatus(status: Record<string, unknown>) {
+  const bounds = status.max_rounds_bounds as Record<string, unknown> | undefined;
+  const value = parseNum(status.max_rounds);
+  return {
+    maxRounds: value > 0 ? value : 3,
+    minRounds: parseNum(bounds?.min) || 1,
+    maxRoundsLimit: parseNum(bounds?.max) || 12,
+  };
+}
 
 function formatNextRoundHint(cadence: CouncilCadence, nowMs: number, isTyping: boolean): string | null {
   if (!cadence.sessionRunning || cadence.finalized) return null;
@@ -307,6 +332,12 @@ export default function AiRecommendation() {
   const [roundGapMin, setRoundGapMin] = useState(15);
   const [roundGapMax, setRoundGapMax] = useState(600);
   const [roundGapEditingCustom, setRoundGapEditingCustom] = useState(false);
+  const [maxRounds, setMaxRounds] = useState(3);
+  const [maxRoundsDraft, setMaxRoundsDraft] = useState("3");
+  const [maxRoundsBusy, setMaxRoundsBusy] = useState(false);
+  const [maxRoundsMin, setMaxRoundsMin] = useState(1);
+  const [maxRoundsLimit, setMaxRoundsLimit] = useState(12);
+  const [maxRoundsEditingCustom, setMaxRoundsEditingCustom] = useState(false);
   const [cadence, setCadence] = useState<CouncilCadence>({
     sessionRunning: false,
     runningRound: false,
@@ -315,6 +346,7 @@ export default function AiRecommendation() {
     roundMinGapMs: 30_000,
   });
   const [raceResults, setRaceResults] = useState<RaceResultsPayload | null>(null);
+  const [scorecard, setScorecard] = useState<ScorecardPayload | null>(null);
   const [raceResultsBusy, setRaceResultsBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const now = useNowTick(1000);
@@ -469,6 +501,7 @@ export default function AiRecommendation() {
     setPendingUserReply(false);
     setTypingState(null);
     setRaceResults(null);
+    setScorecard(null);
     setRaceResultsBusy(false);
     setExportBusy(false);
     setCadence({
@@ -508,6 +541,21 @@ export default function AiRecommendation() {
     },
     [raceKey, selectedRace?.status]
   );
+
+  const loadScorecard = useCallback(() => {
+    if (!raceKey) return Promise.resolve();
+    return apiFetch<ScorecardPayload>(
+      `/api/council/scorecard?meeting_date=${encodeURIComponent(raceKey.meeting_date)}&venue_code=${encodeURIComponent(
+        raceKey.venue_code
+      )}&limit=12`
+    )
+      .then((card) => setScorecard(card))
+      .catch(() => setScorecard(null));
+  }, [raceKey]);
+
+  useEffect(() => {
+    loadScorecard().catch(() => {});
+  }, [loadScorecard, raceResults?.status]);
 
   useEffect(() => {
     if (!raceEnded || !raceKey) return;
@@ -590,6 +638,12 @@ export default function AiRecommendation() {
         setRoundGapMin(gap.minSeconds);
         setRoundGapMax(gap.maxSeconds);
         setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(gap.gapSeconds));
+        const cap = readMaxRoundsFromStatus(status);
+        setMaxRounds(cap.maxRounds);
+        setMaxRoundsDraft(String(cap.maxRounds));
+        setMaxRoundsMin(cap.minRounds);
+        setMaxRoundsLimit(cap.maxRoundsLimit);
+        setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
         const activeSession = (status.active_session as Record<string, unknown> | null) ?? null;
         const running = Boolean(activeSession?.session_id);
         if (running && parseNum(activeSession?.session_id) > 0) {
@@ -660,6 +714,17 @@ export default function AiRecommendation() {
       if (ms > 0) setCadence((prev) => ({ ...prev, roundMinGapMs: ms }));
       return;
     }
+    if (ev.type === "max_rounds_update") {
+      const cap = readMaxRoundsFromStatus(ev as Record<string, unknown>);
+      if (parseNum(ev.max_rounds) > 0) {
+        setMaxRounds(cap.maxRounds);
+        setMaxRoundsDraft(String(cap.maxRounds));
+        setMaxRoundsMin(cap.minRounds);
+        setMaxRoundsLimit(cap.maxRoundsLimit);
+        setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
+      }
+      return;
+    }
     if (ev.type === "picks_update") {
       const p = (ev.picks as CouncilPicks | undefined) ?? null;
       if (p) setPicks(p);
@@ -705,6 +770,12 @@ export default function AiRecommendation() {
           setRoundGapMin(gap.minSeconds);
           setRoundGapMax(gap.maxSeconds);
           setRoundGapEditingCustom(!ROUND_GAP_PRESETS.includes(gap.gapSeconds));
+          const cap = readMaxRoundsFromStatus(status);
+          setMaxRounds(cap.maxRounds);
+          setMaxRoundsDraft(String(cap.maxRounds));
+          setMaxRoundsMin(cap.minRounds);
+          setMaxRoundsLimit(cap.maxRoundsLimit);
+          setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
           const activeSession = (status.active_session as Record<string, unknown> | null) ?? null;
           const sid = parseNum(activeSession?.session_id);
           if (sid > 0) setSessionId((prev) => prev ?? sid);
@@ -766,6 +837,31 @@ export default function AiRecommendation() {
         .finally(() => setRoundGapBusy(false));
     },
     [roundGapMin, roundGapMax]
+  );
+
+  const applyMaxRounds = useCallback(
+    (rounds: number) => {
+      const clamped = Math.min(maxRoundsLimit, Math.max(maxRoundsMin, Math.round(rounds)));
+      if (!Number.isFinite(clamped)) return;
+      setMaxRoundsBusy(true);
+      apiFetch<{ ok: boolean; max_rounds: number; max_rounds_bounds?: Record<string, unknown> }>(
+        "/api/council/max-rounds",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ max_rounds: clamped }),
+        }
+      )
+        .then((r) => {
+          const cap = readMaxRoundsFromStatus(r as Record<string, unknown>);
+          setMaxRounds(cap.maxRounds);
+          setMaxRoundsDraft(String(cap.maxRounds));
+          setMaxRoundsEditingCustom(!MAX_ROUND_PRESETS.includes(cap.maxRounds));
+        })
+        .catch((e: Error) => setManualError(e.message))
+        .finally(() => setMaxRoundsBusy(false));
+    },
+    [maxRoundsMin, maxRoundsLimit]
   );
 
   const stopCouncil = useCallback(() => {
@@ -846,7 +942,7 @@ export default function AiRecommendation() {
           {r.odds ? <span className="ai-picks-odds">@ {r.odds}</span> : null}
           <span className="ai-picks-row-badges">
             {r.count > 1 && <span className="ai-picks-badge">×{r.count}</span>}
-            {r.ev_status === "negative" && <span className="ai-picks-badge warn">EV−</span>}
+            {r.ev_status === "negative" && <span className="ai-picks-badge warn">未達最佳</span>}
             {hasFix && <span className="ai-picks-badge fix">系統修正</span>}
           </span>
         </div>
@@ -870,6 +966,9 @@ export default function AiRecommendation() {
       ? String(roundGapSeconds)
       : "custom";
   const showCustomGapEditor = roundGapEditingCustom || !ROUND_GAP_PRESETS.includes(roundGapSeconds);
+  const maxRoundsSelectValue =
+    MAX_ROUND_PRESETS.includes(maxRounds) && !maxRoundsEditingCustom ? String(maxRounds) : "custom";
+  const showCustomMaxRoundsEditor = maxRoundsEditingCustom || !MAX_ROUND_PRESETS.includes(maxRounds);
 
   return (
     <div className="ai-rec-page">
@@ -1034,6 +1133,62 @@ export default function AiRecommendation() {
                       className="btn btn-ghost ai-council-interval-apply"
                       disabled={roundGapBusy}
                       onClick={() => applyRoundGap(parseNum(roundGapDraft))}
+                    >
+                      套用
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div className="ai-council-field ai-council-field-interval">
+              <label className="field-label" htmlFor="council-max-rounds">
+                每場輪數
+              </label>
+              <div className="ai-council-interval-row">
+                <select
+                  id="council-max-rounds"
+                  className="ai-council-select"
+                  value={maxRoundsSelectValue}
+                  disabled={maxRoundsBusy}
+                  title="調高後再按啟動議會，已結案的場次會接著談"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "custom") {
+                      setMaxRoundsEditingCustom(true);
+                      return;
+                    }
+                    setMaxRoundsEditingCustom(false);
+                    applyMaxRounds(Number(v));
+                  }}
+                >
+                  {MAX_ROUND_PRESETS.map((n) => (
+                    <option key={n} value={n}>
+                      {n} 輪
+                    </option>
+                  ))}
+                  <option value="custom">自訂</option>
+                </select>
+                {showCustomMaxRoundsEditor ? (
+                  <>
+                    <input
+                      type="number"
+                      className="ai-council-interval-input"
+                      min={maxRoundsMin}
+                      max={maxRoundsLimit}
+                      step={1}
+                      value={maxRoundsDraft}
+                      disabled={maxRoundsBusy}
+                      aria-label="自訂每場輪數"
+                      onChange={(e) => setMaxRoundsDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyMaxRounds(parseNum(maxRoundsDraft));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost ai-council-interval-apply"
+                      disabled={maxRoundsBusy}
+                      onClick={() => applyMaxRounds(parseNum(maxRoundsDraft))}
                     >
                       套用
                     </button>
@@ -1293,7 +1448,7 @@ export default function AiRecommendation() {
                     {qplRows.map((r, i) => renderPickRow(r, `qpl-${i}`, false))}
                   </ul>
                 ) : (
-                  <p className="ai-council-picks-empty muted">本輪尚未有 QPL 建議</p>
+                  <p className="ai-council-picks-empty muted">沒有通過期望值門檻的位置Q</p>
                 )}
               </section>
 
@@ -1304,7 +1459,7 @@ export default function AiRecommendation() {
                     {otherRows.map((r, i) => renderPickRow(r, `other-${i}`, true))}
                   </ul>
                 ) : (
-                  <p className="ai-council-picks-empty muted">本輪尚未有其他彩池建議</p>
+                  <p className="ai-council-picks-empty muted">沒有通過期望值門檻的獨贏、位置或連贏</p>
                 )}
               </section>
             </div>
@@ -1314,6 +1469,58 @@ export default function AiRecommendation() {
               <p className="muted">議會開始後，每輪總結會顯示於此。</p>
             </div>
           )}
+
+          <section className="ai-council-results-section" aria-label="記分卡">
+            <header className="ai-council-results-header">
+              <h4 className="ai-council-picks-section-title">記分卡</h4>
+            </header>
+            {!scorecard || (!scorecard.totals?.lines && !scorecard.totals?.suggestion?.lines) ? (
+              <p className="ai-council-picks-empty muted">本賽馬日尚未有可結算注單。</p>
+            ) : (
+              <>
+                <div className="ai-council-scorecard">
+                  <div className="ai-council-scorecard-stat">
+                    <span>放行命中</span>
+                    <strong>
+                      {scorecard.totals.hits}/{scorecard.totals.lines}
+                      {scorecard.totals.hit_pct != null ? ` · ${scorecard.totals.hit_pct}%` : ""}
+                    </strong>
+                  </div>
+                  <div className="ai-council-scorecard-stat">
+                    <span>放行單位回報</span>
+                    <strong>{scorecard.totals.unit_return_sum ?? "—"}</strong>
+                  </div>
+                  {scorecard.totals.suggestion?.lines ? (
+                    <div className="ai-council-scorecard-stat">
+                      <span>未達最佳</span>
+                      <strong>
+                        {scorecard.totals.suggestion.hits}/{scorecard.totals.suggestion.lines}
+                        {scorecard.totals.suggestion.hit_pct != null ? ` · ${scorecard.totals.suggestion.hit_pct}%` : ""}
+                      </strong>
+                    </div>
+                  ) : null}
+                  <div className="ai-council-scorecard-stat">
+                    <span>命中注信心</span>
+                    <strong>{scorecard.totals.avg_confidence_hit ?? "—"}</strong>
+                  </div>
+                  <div className="ai-council-scorecard-stat">
+                    <span>落空注信心</span>
+                    <strong>{scorecard.totals.avg_confidence_miss ?? "—"}</strong>
+                  </div>
+                </div>
+                {scorecard.races?.length ? (
+                  <p className="ai-council-picks-empty muted">
+                    {scorecard.races
+                      .map((race) => {
+                        const s = race.summary;
+                        return `第 ${race.race_no} 場 ${s.hits}/${s.lines}`;
+                      })
+                      .join(" · ")}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </section>
 
           {raceEnded || raceResultsBusy || raceResults != null ? (
             <section className="ai-council-results-section" aria-label="正式賽果">

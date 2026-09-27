@@ -1,4 +1,6 @@
 import { MERGED_RACE_FLAT, deriveRaceScore, parsePositionInt } from "../../routes/analytics.js";
+import { formatHandicapBlock, loadHandicapStats } from "./handicapCard.js";
+import { applyResidual, formatPricingBlock, impliedWinProbs, residualFromStats } from "./pricingCard.js";
 
 const DEFAULT_PAIR_LINES = 40;
 const DEFAULT_POOL_LINES = 24;
@@ -245,12 +247,41 @@ export async function buildRaceContext(db, p) {
   );
   const formByHorse = groupFormByHorse(formRows, runners);
 
+  const race = racecardRace ?? {};
+  const distance = Number.parseInt(String(race.distance ?? ""), 10);
+  const raceMeta = {
+    venue: venue_code,
+    distance: Number.isFinite(distance) ? distance : null,
+    raceClass: race.raceClass ?? race.raceClass_ch ?? race.claCode ?? null,
+    going: race.go ?? race.raceTrack?.description_ch ?? race.raceTrack?.description_en ?? null,
+  };
+  const handicapStats = await loadHandicapStats(db, {
+    meetingDate: meeting_date,
+    venueCode: venue_code,
+    distance: raceMeta.distance,
+    runners,
+  });
+  const adjustments = {};
+  for (const runner of runners ?? []) {
+    const no = String(runner.no ?? "");
+    if (!no) continue;
+    adjustments[no] = residualFromStats(no, handicapStats);
+  }
+  const pricing = applyResidual(impliedWinProbs(oddsSummary.win), adjustments);
+  const handicapBlock = formatHandicapBlock({ raceMeta, runners, stats: handicapStats });
+  const pricingBlock = formatPricingBlock(pricing);
+
   return {
     snapshot: snap,
     oddsSummary,
     pairPools,
     allPools,
     formByHorse,
+    handicapStats,
+    handicapBlock,
+    pricing,
+    pricingBlock,
+    raceMeta,
   };
 }
 

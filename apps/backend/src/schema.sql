@@ -361,6 +361,31 @@ CREATE TABLE IF NOT EXISTS hkjc_council_picks (
 CREATE INDEX IF NOT EXISTS idx_hkjc_council_picks_session_version
   ON hkjc_council_picks (session_id, version DESC);
 
+-- Settled council slips vs official results (one row per pick line).
+CREATE TABLE IF NOT EXISTS hkjc_council_settlements (
+  id BIGSERIAL PRIMARY KEY,
+  session_id BIGINT NOT NULL REFERENCES hkjc_council_sessions(id) ON DELETE CASCADE,
+  picks_version INT NOT NULL,
+  line_no INT NOT NULL,
+  product TEXT NOT NULL,
+  combo TEXT NOT NULL,
+  odds_at_pick TEXT NOT NULL DEFAULT '',
+  closing_odds TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL,
+  payout_hkd NUMERIC(12,2),
+  unit_return NUMERIC(12,4),
+  confidence NUMERIC(6,4),
+  finishers INT,
+  suggestion BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (session_id, picks_version, line_no)
+);
+
+ALTER TABLE hkjc_council_settlements ADD COLUMN IF NOT EXISTS suggestion BOOLEAN NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS idx_hkjc_council_settlements_session
+  ON hkjc_council_settlements (session_id, picks_version);
+
 -- Dashboard identities (session rows are created by connect-pg-simple when createTableIfMissing runs)
 CREATE TABLE IF NOT EXISTS dashboard_users (
   id SERIAL PRIMARY KEY,

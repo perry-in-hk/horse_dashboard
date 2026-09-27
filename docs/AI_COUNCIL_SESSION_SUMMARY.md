@@ -1,6 +1,6 @@
 # HKJC AI Council 功能與本輪開發摘要
 
-> 文件日期：2026-07-08  
+> 文件日期：2026-07-08（架構與穩定性）。2026-09-26 檢查點見第 16 節。  
 > 涵蓋範圍：AI 議會（LLM Council）真互聊會議室、即時 WebSocket、賠率同步聯動、Kelly 秘書、Lead Analyst 主席、可調回合間隔，以及本 chat 期間修復的穩定性問題。
 
 ---
@@ -314,3 +314,111 @@ AI Council 在正式站使用 `/ws/council` WebSocket。
 - Kelly / Lead 對 user 指令的 audit log（哪一輪採納／拒絕）。
 - 多場同時 running 時 OddsSyncChips 顯示所有 armed targets。
 - E2E 測試：一輪完整流程 + WS 事件順序 + re-arm after restart。
+
+---
+
+## 16. 2026-09-26 檢查點：投注表現改版
+
+這一節是改版後的交接。前面第 1–15 節仍是 2026-07-08 的會議室行為，模型名稱與「必須覆蓋多彩池」已不再適用。
+
+### 16.1 這次改了什麼
+
+- 結案注單對正式名次與派彩結算。名次取開頭的完整整數，「10」是第十名。AI 頁與匯出 markdown 顯示命中、單位回報、信心。新表 `hkjc_council_settlements`，backend 啟動時由 `schema.sql` 建立。
+- 會議上下文有今仗檔位、騎師、練馬師、負磅、評分、班次、途程、場地狀況，以及開跑前才可算的同途程上名率、騎師／練馬師 120 日勝出率、檔位分桶。樣本不足就寫「樣本不足」。
+- 獨贏賠率先扣除彩池抽水，殘差上限 ±0.03。程式再檢查 edge。預設只放行 edge ≥ 0.02 且賠率 ≤ 12 的注（`COUNCIL_EDGE_MIN`、`COUNCIL_MAX_BET_ODDS`）。沒有賠率、超過賠率上限、或低於門檻的注會被拿掉。`qpl` / `others` 可以是空陣列，摘要為「本輪無正期望值」。
+- 分析師每輪最多約 4 句。獨贏賠率沒變、沒有新的使用者發言、又未到結案時，不重叫分析師。每場最多 3 輪。主席可以少叫成員。
+- 分析師、Kelly、進行中的主席用 `deepseek-flash`，思考關閉。只有結案那一輪主席用 `deepseek-v4-pro`，思考仍然關閉。
+- 走前回測（2024-09-08 至 2026-09-23，1703 場）裡，同途程、騎師、檔位的回歸係數是 0、0、0。未設賠率上限時，留出段 387 注、命中 1.3%、單位 ROI -71.6%，虧損集中在 30 倍以上。12 倍上限是訓練段虧得最少的切法；留出段 10 注、單位 ROI 0%，樣本太小，不能當成已有邊緣。
+
+### 16.2 正確的議會測試方法
+
+線上某一場還在開跑時，正確做法是在智能分析頁按「啟動議會」，讓它吃即時賠率，賽後用記分卡對正式名次與派彩。2026-09-26 沒有正在進行的賽事，所以用歷史重播，規則要和開跑前一致：
+
+1. 當日名次、派彩不進入提示。近績與統計只用更早的賽馬日。
+2. 歷史賽果頁的結算獨贏賠率當作當時現價。這份頁面沒有逐口賠率，也沒有位置、連贏、位置Q 賠率，所以重播不能放行那些彩池。
+3. 賠率在重播裡不會再變。正式流程在獨贏價不變時會跳過後面的分析師輪，因此每場只跑一輪結案會議：4 位分析師 `deepseek-flash`，結案主席 `deepseek-v4-pro`。
+4. 注單出來之後才用名次計分。獨贏沒有派彩時，命中的單位回報用結算賠率減 1，落空為 -1。
+5. 對照同一場「只買最低獨贏賠率」。空注單的單位回報是 0，用來和這條對照比較。
+
+腳本與快取：
+
+```bash
+cd apps/backend
+node --env-file=/workspace/.env scripts/replay-council.mjs
+```
+
+- 賽果快取：`/tmp/hkjc-backtest/races.json`（由 `scripts/backtest-council.mjs` 從馬會公開本地賽果頁抓取）
+- 報告：`/tmp/hkjc-backtest/replay-report.json`
+- 金鑰只放本機或伺服器 `.env`，不要提交。`callAgent` 先讀 `DEEPSEEK_API_KEY`，否則 `OPENAI_API_KEY`。`OPENAI_BASE_URL` 必須是 `https://api.deepseek.com/v1`。
+
+2026-09-26 已跑的 8 場：2026-02-14 沙田 R6、2026-04-19 沙田 R6、2026-06-10 跑馬地 R6、2026-07-12 沙田 R5 / R7 / R8 / R10、2026-09-13 沙田 R6。八場放行注單都是空的，單位回報 0。定價卡上沒有任何獨贏同時滿足 edge ≥ 0.02 且賠率 ≤ 12。同一 8 場只買最低賠率：8 注、中 1 注（2026-07-12 沙田 R7 的 3 號，2.3 倍），單位回報合計 -5.7。
+
+這條重播量的是「會議加上放行門檻」。`scripts/backtest-council.mjs` 只量定價卡，不呼叫語言模型。
+
+### 16.3 讀 2026-07-12 議會與賽果的 SQL
+
+當時 Linode 上只有 2026-07-12 沙田有議會紀錄：5 個 session、218 則訊息、結案四場（R5、R7、R8、R10）共 31 注、命中 6 注，獨贏 0/4。下面是在伺服器 Postgres 取出這些數字的查詢。容器名與使用者以當時環境為準；使用者不一定是 `hkjc`，先看 `docker exec <postgres 容器> env | grep POSTGRES`。
+
+```bash
+docker exec -i hkjc-postgres psql -U "$POSTGRES_USER" -d hkjc_dashboard -v ON_ERROR_STOP=1
+```
+
+```sql
+-- 議會存量：當日有哪些場、幾則訊息
+SELECT s.meeting_date, s.venue_code, s.race_no, s.status, s.stop_reason,
+       count(DISTINCT s.id) AS sessions,
+       count(m.id) AS messages
+FROM hkjc_council_sessions s
+LEFT JOIN hkjc_council_messages m ON m.session_id = s.id
+GROUP BY s.meeting_date, s.venue_code, s.race_no, s.status, s.stop_reason
+ORDER BY s.meeting_date, s.race_no;
+
+-- 每位講者的發言數
+SELECT s.race_no,
+       COALESCE(m.meta_json->>'agent_code', m.role) AS speaker,
+       count(*) AS n
+FROM hkjc_council_messages m
+JOIN hkjc_council_sessions s ON s.id = m.session_id
+WHERE s.meeting_date = DATE '2026-07-12'
+  AND s.venue_code = 'ST'
+GROUP BY s.race_no, speaker
+ORDER BY s.race_no, speaker;
+
+-- 每場最後一版注單（改版前的結案共識在 picks_json）
+SELECT DISTINCT ON (s.race_no)
+       s.race_no, p.version,
+       p.picks_json->>'summary_zh' AS summary_zh,
+       p.picks_json->>'confidence' AS confidence,
+       p.picks_json->'qpl' AS qpl,
+       p.picks_json->'others' AS others
+FROM hkjc_council_picks p
+JOIN hkjc_council_sessions s ON s.id = p.session_id
+WHERE s.meeting_date = DATE '2026-07-12'
+  AND s.venue_code = 'ST'
+ORDER BY s.race_no, p.version DESC;
+
+-- 正式名次與獨贏賠率
+-- 要用開頭的完整整數。finish_position ~ '^[1-4]' 會把 10–14 當成前四名，不要再用。
+SELECT race_no,
+       horse_no,
+       horse_name,
+       substring(finish_position FROM '^([0-9]+)')::int AS pos,
+       win_odds
+FROM hkjc_race_results
+WHERE race_date = DATE '2026-07-12'
+  AND (upper(racecourse) = 'ST' OR racecourse LIKE '%沙田%')
+ORDER BY race_no, pos NULLS LAST, horse_no;
+```
+
+改版後記分卡由程式結算，查已寫入的結算列：
+
+```sql
+SELECT s.meeting_date, s.venue_code, s.race_no,
+       t.product, t.combo, t.outcome, t.odds_at_pick, t.closing_odds, t.unit_return, t.confidence
+FROM hkjc_council_settlements t
+JOIN hkjc_council_sessions s ON s.id = t.session_id
+WHERE s.meeting_date = DATE '2026-07-12'
+ORDER BY s.race_no, t.line_no;
+```
+
+部署這次改動時不要覆蓋伺服器 `.env`。目錄是 `/root/horse_dashboard`。改動在分支 `cursor/council-betting-revamp-4d50`，尚未進 `main`。在該目錄拉到這條分支後執行 `docker compose up -d --build`。Backend 重啟會套用 `hkjc_council_settlements`。2026-09-26 這台雲端環境沒有 Linode 私鑰，SSH 為 `Permission denied (publickey)`，伺服器尚未重建。

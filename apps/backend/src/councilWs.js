@@ -109,6 +109,9 @@ export function attachCouncilWs({ server, sessionMiddleware }) {
 
     const off = onCouncilEvent((ev) => {
       const p = ev.payload ?? {};
+      if (ev.type === "round_gap_update" || ev.type === "max_rounds_update") {
+        return send(ws, ev.type, p);
+      }
       if (
         p.meeting_date !== race.meeting_date ||
         p.venue_code !== race.venue_code ||

@@ -49,6 +49,14 @@ export function normalizeRacecardRunner(ru) {
     String(ru?.name_en ?? ru?.name_ch ?? "")
       .trim()
       .replace(/\s+/g, " ") || code || "";
+  const person = (v) => {
+    if (v == null || v === "") return null;
+    if (typeof v === "string") return v.trim() || null;
+    const text = String(v.name_ch ?? v.name_en ?? v.name ?? "").trim();
+    return text || null;
+  };
+  const drawRaw = ru?.barrierDrawNumber ?? ru?.barrier ?? ru?.draw;
+  const drawNum = Number.parseInt(String(drawRaw ?? "").trim(), 10);
   return {
     no,
     horse_name: name || "?",
@@ -56,6 +64,11 @@ export function normalizeRacecardRunner(ru) {
     status,
     is_standby,
     standby_no,
+    jockey: person(ru?.jockey),
+    trainer: person(ru?.trainer),
+    draw: Number.isFinite(drawNum) && drawNum > 0 ? drawNum : null,
+    weight: ru?.handicapWeight ?? ru?.actualWeight ?? null,
+    rating: ru?.currentRating ?? ru?.rating ?? null,
   };
 }
 
