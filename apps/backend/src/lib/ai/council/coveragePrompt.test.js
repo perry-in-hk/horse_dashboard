@@ -28,6 +28,7 @@ test("an unnamed drop is injected before the chair task", () => {
   assert.match(prompt, /組合 8,10/);
   assert.match(prompt, /#9 獨贏 7\.8/);
   assert.match(prompt, /第一句先點名/);
+  assert.match(prompt, /本場沒有可沿用的獨贏/);
   assert.doesNotMatch(prompt, /必須先完成/);
   assert.match(prompt, /仍須點名/);
   const nameAt = prompt.indexOf("## 尚未點名");

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyEdgeGate, applyResidual, impliedWinProbs, residualFromStats } from "./pricingCard.js";
+import {
+  EDGE_MIN,
+  MAX_BET_ODDS,
+  applyEdgeGate,
+  applyResidual,
+  formatPricingBlock,
+  impliedWinProbs,
+  labelSuggestionSpeech,
+  residualFromStats,
+} from "./pricingCard.js";
 
 test("implied probabilities sum to 1 after removing the overround", () => {
   const rows = impliedWinProbs({ 1: 1.8, 2: 1.8 });
@@ -97,4 +106,24 @@ test("only the highest-edge win is released, and place or quinella keep one each
   assert.equal(gated.others.filter((row) => row.product === "PLA").length, 1);
   assert.equal(gated.others.filter((row) => row.product === "QIN").length, 1);
   assert.ok(gated.qpl.length <= 3);
+});
+
+const shaTinCard = [
+  { no: "6", odds: 3, market_prob: 0.3, model_prob: 0.28, edge: -0.166 },
+  { no: "9", odds: 7.8, market_prob: 0.1, model_prob: 0.08, edge: -0.4 },
+  { no: "8", odds: 35, market_prob: 0.02, model_prob: 0.02, edge: -0.3 },
+];
+
+test("stake talk on a negative card is marked 未達最佳 and the odds cap stays", () => {
+  if (!process.env.COUNCIL_EDGE_MIN) assert.equal(EDGE_MIN, 0.02);
+  if (!process.env.COUNCIL_MAX_BET_ODDS) assert.equal(MAX_BET_ODDS, 12);
+  assert.equal(labelSuggestionSpeech("維持 1-6 為軸", shaTinCard), "維持 1-6 為軸（未達最佳）");
+  assert.equal(labelSuggestionSpeech("維持未達最佳的獨贏 #6", shaTinCard), "維持未達最佳的獨贏 #6");
+  assert.equal(labelSuggestionSpeech("#3 位置賠率收到 2.00", shaTinCard), "#3 位置賠率收到 2.00");
+  assert.match(formatPricingBlock(shaTinCard), /維持未達最佳的獨贏 #6/);
+  const released = [
+    { no: "2", odds: 4, market_prob: 0.2, model_prob: 0.35, edge: 0.4 },
+  ];
+  assert.equal(labelSuggestionSpeech("維持 #2", released), "維持 #2");
+  assert.doesNotMatch(formatPricingBlock(released), /未達最佳/);
 });

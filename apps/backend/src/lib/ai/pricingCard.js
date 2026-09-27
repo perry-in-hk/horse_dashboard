@@ -239,6 +239,34 @@ export function applyEdgeGate(picks, pricing, fieldSize) {
   };
 }
 
+export function hasReleasableWin(pricing) {
+  return (pricing ?? []).some((row) => {
+    const odds = Number(row?.odds);
+    const edge = Number(row?.edge);
+    if (!(odds > 1) || !Number.isFinite(edge)) return false;
+    if (MAX_BET_ODDS > 0 && odds > MAX_BET_ODDS) return false;
+    return edge >= EDGE_MIN;
+  });
+}
+
+/** When no win clears the gate, stake-like chat must say 未達最佳. */
+export function labelSuggestionSpeech(text, pricing) {
+  const body = String(text ?? "");
+  if (!body.trim() || body.includes("未達最佳")) return body;
+  if (hasReleasableWin(pricing) || !suggestWin(pricing)) return body;
+  if (!/為軸|主攻|值得落注|正式推薦|維持/.test(body)) return body;
+  return `${body}（未達最佳）`;
+}
+
+export function suggestionSpeechInstruction(pricing) {
+  if (hasReleasableWin(pricing)) {
+    return "若你的建議與上一輪相同，一句話講「維持 X 與 Y」即可，不得重列理由。";
+  }
+  const suggestion = suggestWin(pricing);
+  if (!suggestion) return "本場沒有可沿用的獨贏。不可把任何馬寫成「為軸」或「主攻」。";
+  return `若沿用上一輪獨贏，必須寫「維持未達最佳的獨贏 #${suggestion.combo}」。禁止寫「為軸」或「主攻」。`;
+}
+
 export function formatPricingBlock(pricing) {
   if (!pricing?.length) return "定價卡：缺少獨贏賠率，本輪不應產出注單。";
   const lines = pricing
@@ -248,5 +276,10 @@ export function formatPricingBlock(pricing) {
       (row) =>
         `#${row.no} odds ${row.odds} | market ${(row.market_prob * 100).toFixed(1)}% | model ${(row.model_prob * 100).toFixed(1)}% | edge ${row.edge.toFixed(3)}`
     );
-  return ["定價卡（程式計算，禁止自填百分比）", ...lines].join("\n");
+  const suggestion = suggestWin(pricing);
+  const note =
+    !hasReleasableWin(pricing) && suggestion
+      ? `沒有可放行的獨贏。沿用時寫「維持未達最佳的獨贏 #${suggestion.combo}」，不可寫「為軸」或「主攻」。`
+      : "";
+  return ["定價卡（程式計算，禁止自填百分比）", ...lines, note].filter(Boolean).join("\n");
 }

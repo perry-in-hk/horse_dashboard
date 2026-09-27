@@ -2,7 +2,7 @@ import { COUNCIL_AGENTS, COUNCIL_AGENT_ORDER, STAGE2_REVIEW_PROMPT } from "./age
 import { callAgentChat } from "./callAgent.js";
 import { formatCoverageBlock } from "./coverageGaps.js";
 import { parseCouncilPicks } from "./picksSchema.js";
-import { applyEdgeGate } from "../pricingCard.js";
+import { applyEdgeGate, labelSuggestionSpeech, suggestionSpeechInstruction } from "../pricingCard.js";
 import { formatHktDateTime, toUtcIso } from "../../timeHkt.js";
 
 function truncateText(s, max = 16000) {
@@ -366,7 +366,7 @@ export function buildAnalystTurnPrompt({
     "反重複硬性規則（違反即視為失職）：",
     "1) MeetingTranscript 中你自己之前講過的內容一律不可複述（包括開場白、同一組賠率、同一段近績）。",
     "2) 本輪只講增量：a) 自上一輪以來的數據變化（賠率、動量、新訊號）；b) 一個新觀點，或對其他成員的具體質疑/反駁；c) 更新後的組合建議。",
-    "3) 若你的建議與上一輪相同，一句話講「維持 X 與 Y」即可，不得重列理由。",
+    `3) ${suggestionSpeechInstruction(context?.pricing)}`,
     "4) 若無新數據且你完全同意現有共識，總長不得超過 3 句。",
     "你必須：",
     "1) 推進討論（使用者發言由 Kelly 回應，不要代答）",
@@ -514,6 +514,7 @@ export function buildBookieRoundPrompt({
     "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。裁決只約束注單，不禁止點名。",
     "directives 給每位成員的任務要具體到「查哪個數據、答哪個問題」，禁止空泛的「繼續觀察」。",
     "round_summary_zh/en 只寫本輪相對上一輪的變化 + 你的裁決重點；若無變化寫「共識不變」加原因。",
+    suggestionSpeechInstruction(context?.pricing),
     ...coverageRules,
     ...newUserBlock,
     ...kellyBlock,
@@ -611,12 +612,13 @@ export async function runCouncilChatroomRound(input) {
       max_tokens: agent.max_tokens,
       sharedPrefix,
     });
+    const spoken = labelSuggestionSpeech(out.text, context?.pricing);
     const turn = {
       round_no: roundNo,
       turn_no: turnNo,
       agent_code: code,
       model: out.model,
-      response: out.text,
+      response: spoken,
       usage: out.usage,
       reply_to_speaker: previousSpeaker,
     };
@@ -626,7 +628,7 @@ export async function runCouncilChatroomRound(input) {
       speaker: code,
       round_no: roundNo,
       turn_no: turnNo,
-      content: out.text,
+      content: spoken,
     });
     previousSpeaker = code;
     await emit("chat_turn_complete", turn);
@@ -695,12 +697,13 @@ export async function runCouncilChatroomRound(input) {
       });
       const relayMatch = String(kellyOut.text ?? "").match(KELLY_RELAY_RE);
       kellyRelay = relayMatch ? relayMatch[1].trim() : "";
+      const kellySpoken = labelSuggestionSpeech(kellyOut.text, context?.pricing);
       kellyTurn = {
         round_no: roundNo,
         turn_no: kellyTurnNo,
         agent_code: "kelly",
         model: kellyOut.model,
-        response: kellyOut.text,
+        response: kellySpoken,
         usage: kellyOut.usage,
         reply_to_speaker: previousSpeaker,
         relay_to_lead: kellyRelay || null,
@@ -710,7 +713,7 @@ export async function runCouncilChatroomRound(input) {
         speaker: "kelly",
         round_no: roundNo,
         turn_no: kellyTurnNo,
-        content: kellyOut.text,
+        content: kellySpoken,
       });
       previousSpeaker = "kelly";
       await emit("chat_turn_complete", kellyTurn);
@@ -777,7 +780,10 @@ export async function runCouncilChatroomRound(input) {
 
   const picksParsed = parseCouncilPicks(bookieObj?.current_picks ?? bookieObj?.picks ?? {}, validHorseNos);
   const currentPicks = gatePicks(picksParsed.success ? picksParsed.data : buildFallbackPicks(), context);
-  const roundSummaryZh = String(bookieObj?.round_summary_zh ?? currentPicks.summary_zh ?? "本輪總結：暫無。").trim();
+  const roundSummaryZh = labelSuggestionSpeech(
+    String(bookieObj?.round_summary_zh ?? currentPicks.summary_zh ?? "本輪總結：暫無。").trim(),
+    context?.pricing
+  );
   const roundSummaryEn = String(bookieObj?.round_summary_en ?? currentPicks.summary_en ?? "Round summary unavailable.").trim();
   // When picks fell back (or lack a summary), reuse the round summary so the
   // consensus card still shows meaningful text instead of a generic notice.
@@ -800,11 +806,11 @@ export async function runCouncilChatroomRound(input) {
       reason_zh: String(v?.reason_zh ?? v?.reason ?? "").trim(),
     }))
     .filter((v) => COUNCIL_AGENT_ORDER.includes(v.agent));
-  const rulingZh = String(bookieObj?.ruling_zh ?? "").trim();
+  const rulingZh = labelSuggestionSpeech(String(bookieObj?.ruling_zh ?? "").trim(), context?.pricing);
   const directives = (Array.isArray(bookieObj?.directives) ? bookieObj.directives : [])
     .map((d) => ({
       agent: String(d?.agent ?? "").trim().toLowerCase(),
-      task_zh: String(d?.task_zh ?? d?.task ?? "").trim(),
+      task_zh: labelSuggestionSpeech(String(d?.task_zh ?? d?.task ?? "").trim(), context?.pricing),
     }))
     .filter((d) => COUNCIL_AGENT_ORDER.includes(d.agent) && d.task_zh);
 
