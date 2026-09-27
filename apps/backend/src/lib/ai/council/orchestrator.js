@@ -1,5 +1,6 @@
 import { COUNCIL_AGENTS, COUNCIL_AGENT_ORDER, STAGE2_REVIEW_PROMPT } from "./agents.js";
 import { callAgentChat } from "./callAgent.js";
+import { formatCoverageBlock } from "./coverageGaps.js";
 import { parseCouncilPicks } from "./picksSchema.js";
 import { applyEdgeGate } from "../pricingCard.js";
 import { formatHktDateTime, toUtcIso } from "../../timeHkt.js";
@@ -317,7 +318,7 @@ function normalizeUserDisposition(v) {
   return "parked";
 }
 
-function buildAnalystTurnPrompt({
+export function buildAnalystTurnPrompt({
   context,
   userMessages,
   pendingUserMessages,
@@ -330,12 +331,21 @@ function buildAnalystTurnPrompt({
   chairRuling,
 }) {
   const pending = Array.isArray(pendingUserMessages) ? pendingUserMessages : [];
+  const coverage = formatCoverageBlock(context, transcript);
   const chairBlock = [];
   if (chairRuling) {
-    chairBlock.push(`主席上輪裁決（已定案，除非出現裁決中列明的翻案條件，禁止再爭論）：${chairRuling}`);
+    chairBlock.push(
+      coverage
+        ? `主席上輪裁決（注單立場已定，除非出現翻案條件不可改注；「尚未點名」的馬號仍須點名）：${chairRuling}`
+        : `主席上輪裁決（已定案，除非出現裁決中列明的翻案條件，禁止再爭論）：${chairRuling}`
+    );
   }
   if (chairDirective) {
-    chairBlock.push(`主席指派給你的本輪任務（必須先完成）：${chairDirective}`);
+    chairBlock.push(
+      coverage
+        ? `主席指派給你的本輪任務（第一句先點名「尚未點名」的一項，然後才做此任務）：${chairDirective}`
+        : `主席指派給你的本輪任務（必須先完成）：${chairDirective}`
+    );
   }
   chairBlock.push("使用者發言由秘書 Kelly 統一回應；只有當內容與你的專業直接相關時才簡短回應，否則專注推進分析。");
   const userBlock = pending.length
@@ -361,8 +371,11 @@ function buildAnalystTurnPrompt({
     "你必須：",
     "1) 推進討論（使用者發言由 Kelly 回應，不要代答）",
     "2) 回應上一位分析師的關鍵觀點（若有）",
-    "3) 指出定價卡可能高估或低估的一匹馬，或寫「同意定價卡、無新增」",
+    coverage
+      ? "3) 第一句點名「尚未點名」的一項。之後才可寫主席任務，或指出定價卡高估或低估的一匹馬。「同意定價卡、無新增」不可用來跳過第一句。"
+      : "3) 指出定價卡可能高估或低估的一匹馬，或寫「同意定價卡、無新增」",
     "",
+    ...(coverage ? [coverage, ""] : []),
     ...userBlock,
     "",
     // Sparse context (per multi-agent-debate research): a short window keeps
@@ -411,7 +424,7 @@ function buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }
       { agent: "trend", verdict: "reject", reason_zh: "重複上輪已否決的舊訊號，無新內容" },
       { agent: "scout", verdict: "adopt", reason_zh: "剔除 #4 相關組合的現實檢核合理" },
     ],
-    ruling_zh: "裁決：#3 納入次選、#5 剔出候選；除非 #5 WIN 跌破 9.0，此議題不再討論。",
+    ruling_zh: "裁決：#5 不放進注單；除非 #5 WIN 跌破 9.0，否則維持不下注。清單上的馬號仍須點名。",
     directives: [
       { agent: "quant", task_zh: "核對 QPL 3-7 與 2-7 現價差，判斷哪個值博率高" },
       { agent: "historian", task_zh: "只補充 #7 的檔位與騎練數據，不要重談 #3" },
@@ -438,7 +451,7 @@ function buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }
   return JSON.stringify(example, null, 2);
 }
 
-function buildBookieRoundPrompt({
+export function buildBookieRoundPrompt({
   context,
   transcript,
   roundNo,
@@ -475,6 +488,15 @@ function buildBookieRoundPrompt({
       `你上一輪的 confidence：${Number(previousConfidence)}。本輪必須重新計算；若不變，需在 round_summary_zh 說明原因。`
     );
   }
+  const coverage = formatCoverageBlock(context, transcript);
+  const coverageRules = coverage
+    ? [
+        coverage,
+        "round_summary_zh 必須點名上方「尚未點名」的至少一項。",
+        "directives 必須有一項要求下一位成員核對清單的下一項，並寫出池種或獨贏賠率。",
+        "ruling_zh 可以禁止把該項放進注單，但不可禁止點名清單上的馬號，也不可用「不再討論」跳過清單。",
+      ]
+    : ["本輪紀錄已覆蓋急跌與 4 至 15 倍獨贏。round_summary_zh 寫「沒有遺漏的賠率變動」。"];
   return [
     "你是會議主席、首席分析師（Lead Analyst）。請輸出嚴格 JSON，不要 markdown、不要註解、不要多餘文字。",
     shouldFinalize
@@ -489,9 +511,10 @@ function buildBookieRoundPrompt({
     "qpl 最多 3 筆且 combo 不可重複；只寫有正 edge 的位置Q。",
     "others 的獨贏只寫 edge 最高的一注，位置與連贏各最多一注。沒有正 edge 時仍要寫一注賠率不超過 12 倍、edge 最高的獨贏，reason 包含「未達最佳」，ev_status 必須是 negative。",
     "member_verdicts 必須涵蓋本輪每位有發言的成員；重複舊內容或空白發言一律 reject。",
-    "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。",
+    "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。裁決只約束注單，不禁止點名。",
     "directives 給每位成員的任務要具體到「查哪個數據、答哪個問題」，禁止空泛的「繼續觀察」。",
     "round_summary_zh/en 只寫本輪相對上一輪的變化 + 你的裁決重點；若無變化寫「共識不變」加原因。",
+    ...coverageRules,
     ...newUserBlock,
     ...kellyBlock,
     "",
