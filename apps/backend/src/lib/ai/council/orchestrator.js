@@ -2,6 +2,7 @@ import { COUNCIL_AGENTS, COUNCIL_AGENT_ORDER, STAGE2_REVIEW_PROMPT } from "./age
 import { callAgentChat } from "./callAgent.js";
 import { parseCouncilPicks } from "./picksSchema.js";
 import { formatHktDateTime, toUtcIso } from "../../timeHkt.js";
+import { NO_PREOFF_QUOTE, formatFormHorseLine, formatRunnerLine } from "../councilPacket.js";
 
 function truncateText(s, max = 16000) {
   const text = String(s ?? "");
@@ -27,15 +28,17 @@ function buildRunnersTable(context) {
   const win = context?.oddsSummary?.win ?? {};
   const pla = context?.oddsSummary?.pla ?? {};
   const rows = [...runners]
-    .map((r) => ({
-      no: parseHorseNo(r?.no ?? r?.horseNo ?? r?.number),
-      name: String(r?.horse_name ?? r?.name ?? r?.horseName ?? "?").trim(),
-    }))
+    .map((r) => ({ runner: r, no: parseHorseNo(r?.no ?? r?.horseNo ?? r?.number) }))
     .filter((r) => r.no != null)
     .sort((a, b) => a.no - b.no)
-    .map((r) => {
-      const key = String(r.no);
-      return `#${r.no} ${r.name} | WIN ${fmtOdds(win[key])} | PLA ${fmtOdds(pla[key])}`;
+    .map(({ runner, no }) => {
+      const key = String(no);
+      const hasWin = Object.prototype.hasOwnProperty.call(win, key);
+      const hasPla = Object.prototype.hasOwnProperty.call(pla, key);
+      return formatRunnerLine(
+        { ...runner, no },
+        { win: hasWin ? win[key] : "", pla: hasPla ? pla[key] : "" }
+      );
     });
   return rows.length ? rows.join("\n") : "- (no runners)";
 }
@@ -87,12 +90,25 @@ function buildFormSummary(context) {
     const horseNo = noByCode.get(code);
     if (!horseNo) continue;
     const horseName = String(horse?.horse_name ?? code).trim();
-    const rows = Array.isArray(horse?.rows) ? horse.rows.slice(0, 5) : [];
+    const allRows = Array.isArray(horse?.rows) ? horse.rows : [];
+    const rows = allRows.slice(0, 5);
     const posSeq = rows.map((r) => String(r?.finish_position ?? "-").trim()).join("/");
     const scores = rows.map((r) => Number(r?.race_score)).filter((n) => Number.isFinite(n));
     const avgScore = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : "-";
+    const runner = runners.find(
+      (r) => String(r?.horse_code ?? "").trim().toUpperCase() === code
+    );
     lines.push(
-      `#${horseNo} ${horseName} | 近5名次 ${posSeq || "-"} | avgScore ${avgScore} | 樣本 ${rows.length}`
+      formatFormHorseLine({
+        horseNo,
+        horseName,
+        jockey: runner?.jockey ?? "",
+        draw: runner?.draw ?? "",
+        venue: runner?.venue || context?.venue_code || "",
+        rows: allRows,
+        distance: context?.race_distance ?? null,
+        recent: `${posSeq || "-"} avgScore ${avgScore} n=${rows.length}`,
+      })
     );
   }
   lines.sort((a, b) => {
@@ -103,7 +119,8 @@ function buildFormSummary(context) {
     if (!nb) return -1;
     return na - nb;
   });
-  return lines.length ? lines.join("\n") : "- (no form rows)";
+  const body = lines.length ? lines.join("\n") : "- (no form rows)";
+  return `${body}\nwin_odds 為過往結算賠率，不是今場開跑前報價。`;
 }
 
 function buildContextText(context) {
@@ -118,7 +135,7 @@ function buildContextText(context) {
       buildRunnersTable(context),
       "",
       "### OddsSummary",
-      `source=${String(oddsSummary.source ?? "none")}, observed_at=${String(oddsSummary.observed_at ?? "-")}`,
+      `source=${String(oddsSummary.source ?? "none")}, observed_at=${String(oddsSummary.observed_at ?? "-")}, note=${String(oddsSummary.note || (oddsSummary.preoff ? "" : NO_PREOFF_QUOTE))}`,
       "",
       "### PairPools",
       buildPairPoolsText(context),

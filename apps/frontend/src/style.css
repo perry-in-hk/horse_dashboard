@@ -2693,3 +2693,44 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* === AI race field ======================================================== */
+.ai-field { margin-bottom: 16px; }
+.ai-field-head { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin-bottom: 8px; }
+.ai-field-title { margin: 0; font-size: 18px; }
+.ai-field-day { margin: 4px 0 0; color: var(--text-secondary); font-size: 13px; }
+.ai-field-note { margin: 0 0 12px; font-size: 12px; }
+.ai-field-meeting { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
+.ai-field-meeting select, .ai-field-race-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.ai-field-race { padding: 10px 0; border-top: 1px solid var(--border-medium); }
+.ai-field-win { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; margin: 8px 0; }
+.ai-field-win-tag, .ai-horse-badge {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: 1px 6px;
+}
+.ai-field-win-no, .ai-horse-no { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ai-field-win-reason { color: var(--text-secondary); }
+.ai-field-empty { margin: 8px 0; color: var(--text-muted); }
+.ai-field-follow { margin: 0 0 8px; padding-left: 18px; font-size: 13px; }
+.ai-field-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 8px; }
+.ai-horse-card { border: 1px solid var(--border-medium); border-radius: 12px; padding: 10px 12px; background: var(--bg-overlay); }
+.ai-horse-card.is-suggestion { border-color: var(--color-accent, var(--border-strong)); }
+.ai-horse-card header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ai-horse-meta, .ai-horse-silent { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; }
+.ai-horse-quotes { margin: 8px 0 0; padding-left: 16px; font-size: 12px; }
+.ai-horse-quote-src { display: inline-block; margin-right: 6px; color: var(--text-muted); }
+.ai-board-council { margin-top: 8px; }
+.ai-board-council-summary {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  cursor: pointer; padding: 14px 16px; font-weight: 700; list-style: none;
+}
+.ai-board-council-summary::-webkit-details-marker { display: none; }
+.ai-board-council[open] .ai-board-council-summary { border-bottom: 1px solid var(--border-strong); }
+.ai-board-council .ai-council-layout { padding: 0 16px 16px; }
