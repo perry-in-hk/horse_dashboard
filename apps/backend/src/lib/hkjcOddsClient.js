@@ -49,6 +49,8 @@ export function normalizeRacecardRunner(ru) {
     String(ru?.name_en ?? ru?.name_ch ?? "")
       .trim()
       .replace(/\s+/g, " ") || code || "";
+  const jockey = String(ru?.jockey?.name_ch ?? ru?.jockey?.name_en ?? "").trim().replace(/\s+/g, " ");
+  const drawN = parseInt(String(ru?.barrierDrawNumber ?? "").trim(), 10);
   return {
     no,
     horse_name: name || "?",
@@ -56,6 +58,8 @@ export function normalizeRacecardRunner(ru) {
     status,
     is_standby,
     standby_no,
+    jockey,
+    draw: Number.isFinite(drawN) && drawN > 0 ? drawN : null,
   };
 }
 

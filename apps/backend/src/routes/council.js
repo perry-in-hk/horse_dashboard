@@ -5,6 +5,7 @@ import { pool } from "../db.js";
 import {
   appendUserMessage,
   getCouncilStatus,
+  getMeetingPicks,
   getMessages,
   getRoundGapBounds,
   hydrateRoundGapFromRedis,
@@ -47,6 +48,21 @@ router.get("/status", async (req, res) => {
     raceNo: q.race_no,
   });
   res.json(status);
+});
+
+router.get("/meeting-picks", async (req, res) => {
+  const parsed = z
+    .object({
+      meeting_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      venue_code: z.string().min(1),
+    })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+  const races = await getMeetingPicks({
+    meetingDate: parsed.data.meeting_date,
+    venueCode: parsed.data.venue_code,
+  });
+  res.json({ races });
 });
 
 const activateDateBody = z.object({

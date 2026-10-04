@@ -1,4 +1,5 @@
 import { MERGED_RACE_FLAT, deriveRaceScore, parsePositionInt } from "../../routes/analytics.js";
+import { buildPreOffOddsSummary, postTimeMs } from "./councilPacket.js";
 
 const DEFAULT_PAIR_LINES = 40;
 const DEFAULT_POOL_LINES = 24;
@@ -108,6 +109,21 @@ export async function loadLatestSnapshotPayload(db, meetingDate, venueCode, race
   return r.rows[0] ?? null;
 }
 
+/** Latest snapshot strictly before post time. Omit beforeIso when post time is unknown. */
+export async function loadSnapshotBefore(db, meetingDate, venueCode, raceNo, beforeIso) {
+  const params = [meetingDate, venueCode, raceNo];
+  let sql = `SELECT payload, observed_at
+     FROM hkjc_odds_snapshots
+     WHERE meeting_date = $1::date AND venue_code = $2 AND race_no = $3`;
+  if (beforeIso) {
+    sql += ` AND observed_at < $4::timestamptz`;
+    params.push(beforeIso);
+  }
+  sql += ` ORDER BY observed_at DESC LIMIT 1`;
+  const r = await db.query(sql, params);
+  return r.rows[0] ?? null;
+}
+
 export async function loadRecentFormRows(db, horseCodes, capPerHorse) {
   const codes = horseCodes.map((c) => c.trim().toUpperCase()).filter(Boolean);
   if (codes.length === 0) return [];
@@ -116,6 +132,7 @@ export async function loadRecentFormRows(db, horseCodes, capPerHorse) {
     `WITH ranked AS (
        SELECT mr.race_date, mr.racecourse, mr.race_no, mr.horse_code, mr.horse_name,
               mr.jockey, mr.trainer, mr.finish_position, mr.finish_time, mr.win_odds, mr.draw,
+              mr.race_distance,
               ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(mr.horse_code, '')
                 ORDER BY COALESCE(mr.race_date, DATE '1900-01-01') DESC, mr.race_no DESC NULLS LAST
@@ -124,7 +141,7 @@ export async function loadRecentFormRows(db, horseCodes, capPerHorse) {
        WHERE mr.horse_code = ANY($1::text[])
      )
      SELECT race_date, racecourse, race_no, horse_code, horse_name, jockey, trainer,
-            finish_position, finish_time, win_odds, draw
+            finish_position, finish_time, win_odds, draw, race_distance
      FROM ranked WHERE rn <= $2
      ORDER BY horse_code, race_date DESC, race_no DESC NULLS LAST`,
     [codes, capPerHorse]
@@ -196,24 +213,32 @@ export async function buildRaceContext(db, p) {
     poolLimit = DEFAULT_POOL_LINES,
   } = p;
 
-  const snap = await loadLatestSnapshotPayload(db, meeting_date, venue_code, race_no);
+  const postMs = postTimeMs(meeting_date, racecardRace?.postTime);
+  const beforeIso = postMs != null ? new Date(postMs).toISOString() : null;
+  const snap = await loadSnapshotBefore(db, meeting_date, venue_code, race_no, beforeIso);
+  const preOff = buildPreOffOddsSummary({
+    snapshots: snap ? [snap] : [],
+    postTimeMs: postMs,
+    // Explicitly ignored. Settlement and racecard win odds are not today's price.
+    resultWinOdds: null,
+    racecardWin: winOddsFromRacecardRace(racecardRace).win,
+  });
 
-  let oddsSummary = { source: "none", observed_at: null, win: {}, pla: {} };
+  let oddsSummary = {
+    source: preOff.source,
+    observed_at: preOff.observed_at,
+    win: preOff.win,
+    pla: preOff.pla,
+    note: preOff.note,
+    preoff: preOff.preoff,
+  };
   let pairPools = { source: "none", observed_at: null, qin: [], qpl: [], qin_truncated: false, qpl_truncated: false };
   /** @type {{ source: string, observed_at: string | null, pools: Record<string, { comb: string, odds: number }[]> }} */
   let allPools = { source: "none", observed_at: null, pools: {} };
 
-  if (snap?.payload) {
+  if (preOff.preoff && snap?.payload) {
     const observedAt = snap.observed_at ? new Date(snap.observed_at).toISOString() : null;
     const summarized = summarizePools(snap.payload, pairLimit, poolLimit);
-    if (Object.keys(summarized.win).length || Object.keys(summarized.pla).length) {
-      oddsSummary = {
-        source: "snapshot",
-        observed_at: observedAt,
-        win: summarized.win,
-        pla: summarized.pla,
-      };
-    }
     pairPools = {
       source: "snapshot",
       observed_at: observedAt,
@@ -227,14 +252,6 @@ export async function buildRaceContext(db, p) {
       observed_at: observedAt,
       pools: summarized.allPools,
     };
-  }
-
-  if (oddsSummary.source === "none") {
-    const race = racecardRace ?? null;
-    const { win, pla } = winOddsFromRacecardRace(race);
-    if (Object.keys(win).length || Object.keys(pla).length) {
-      oddsSummary = { source: "racecard", observed_at: null, win, pla };
-    }
   }
 
   const cap = focused ? focusFormRowsPerHorse : formRowsPerHorse;

@@ -5,6 +5,7 @@ import { apiFetch } from "../api/client.ts";
 import PageHeader from "../components/PageHeader.tsx";
 import RaceTimeContext from "../components/RaceTimeContext.tsx";
 import OddsSyncChips from "../components/OddsSyncChips.tsx";
+import AiRaceField from "../components/AiRaceField.tsx";
 import {
   readSharedMeetingRace,
   resolveMeetingIndex,
@@ -873,7 +874,7 @@ export default function AiRecommendation() {
 
   return (
     <div className="ai-rec-page">
-      <PageHeader title="智能分析（AI）" subtitle="AI 議會即時分析本場賽事，開跑前發布共識。" />
+      <PageHeader title="智能分析（AI）" subtitle="打開就係當日各場。第一行係首席嘅獨贏建議；全場每匹馬一張卡。議會聊天室收埋。" />
 
       <div className="card ai-council-statusbar">
         <div className="ai-council-status-head">
@@ -910,7 +911,26 @@ export default function AiRecommendation() {
         </div>
       </div>
 
-      <div className="card ai-rec-action-card ai-council-layout">
+      <AiRaceField
+        meetingDate={meetingDate}
+        venueCode={venueCode}
+        races={meeting?.races}
+        raceNo={raceNo}
+        onSelectRace={setRaceNo}
+        meetings={meetings}
+        meetingIdx={meetingIdx}
+        onMeetingIdx={setMeetingIdx}
+        loadingMeetings={loadingMeetings}
+        messages={messages}
+        livePicks={picks}
+      />
+
+      <details className="card ai-board-council">
+        <summary className="ai-board-council-summary">
+          <span>議會聊天室</span>
+          <span className="muted">{messages.length || picks || cadence.sessionRunning ? sessionStateText : "議會尚未開始，撳開先用"}</span>
+        </summary>
+        <div className="ai-council-layout">
         <div className="ai-council-toolbar">
           <section className="ai-council-toolbar-section" aria-label="場次與控制">
             <h3 className="ai-council-toolbar-section-title">場次</h3>
@@ -1111,8 +1131,8 @@ export default function AiRecommendation() {
             <div className="ai-council-chat-list" ref={chatListRef} onScroll={onChatScroll}>
               {messages.length === 0 && !typingState ? (
                 <div className="ai-council-chat-empty">
-                  <p className="ai-council-chat-empty-title">尚無會議記錄</p>
-                  <p className="muted">按「啟動議會」開始本場分析，或直接輸入你的問題。</p>
+                  <p className="ai-council-chat-empty-title">議會尚未開始</p>
+                  <p className="muted">呢度係紀錄，唔係主畫面。要傾先按「啟動議會」。</p>
                 </div>
               ) : (
                 renderedMessages.map((row) => {
@@ -1310,8 +1330,8 @@ export default function AiRecommendation() {
             </div>
           ) : (
             <div className="ai-council-picks-empty-state">
-              <p className="ai-council-picks-empty-title">尚無共識</p>
-              <p className="muted">議會開始後，每輪總結會顯示於此。</p>
+              <p className="ai-council-picks-empty-title">議會尚未開始</p>
+              <p className="muted">開會之後，共識先會出現喺呢張卡。</p>
             </div>
           )}
 
@@ -1408,7 +1428,8 @@ export default function AiRecommendation() {
         </aside>
         {meetingsErr && <p className="error-text ai-rec-error-line ai-council-layout-full">{meetingsErr}</p>}
         {manualError && <p className="error-text ai-rec-error-line ai-council-layout-full">{manualError}</p>}
-      </div>
+        </div>
+      </details>
 
       <footer className="ai-rec-footnote muted">所有時間以香港時間（HKT, UTC+8）顯示。</footer>
     </div>

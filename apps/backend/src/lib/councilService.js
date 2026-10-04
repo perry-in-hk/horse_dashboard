@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { pool } from "../db.js";
 import { getRedisClient } from "./redisClient.js";
 import { buildRaceContext } from "./ai/buildRaceContext.js";
+import { shapeRunnersForPacket } from "./ai/councilPacket.js";
 import { buildOddsMomentumPromptBlock } from "./ai/oddsMomentum.js";
 import { runCouncilChatroomRound, runCouncilRound } from "./ai/council/orchestrator.js";
 import { fetchMeetingWithRunners, fetchRaceRunnersForRace } from "./hkjcOddsClient.js";
@@ -340,18 +341,24 @@ async function loadContext(meetingDate, venueCode, raceNo, userMessages) {
     venue_code: venueCode,
     race_no: raceNo,
   });
+  const course = String(
+    race?.raceCourse?.description_ch ?? race?.raceCourse?.displayCode ?? ""
+  ).trim();
+  const distanceN = Number(race?.distance);
   return {
     meeting_date: meetingDate,
     venue_code: venueCode,
     race_no: raceNo,
+    race_distance: Number.isFinite(distanceN) && distanceN > 0 ? distanceN : null,
     race_info: race
       ? {
           no: race.no,
           postTime: race.postTime ?? "",
           status: race.status ?? "",
+          course,
         }
       : null,
-    runners,
+    runners: shapeRunnersForPacket(runners, { venueCode, course }),
     oddsSummary: built.oddsSummary,
     pairPools: built.pairPools,
     allPools: built.allPools,
@@ -1024,6 +1031,25 @@ export async function runCouncilRoundForRace({ meetingDate, venueCode, raceNo, f
     state.runningRound = false;
     emitCadenceUpdate(state);
   }
+}
+
+export async function getMeetingPicks({ meetingDate, venueCode }) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (s.race_no)
+        s.race_no,
+        p.picks_json,
+        p.created_at
+     FROM hkjc_council_sessions s
+     JOIN hkjc_council_picks p ON p.session_id = s.id
+     WHERE s.meeting_date = $1::date AND s.venue_code = $2
+     ORDER BY s.race_no, p.created_at DESC`,
+    [meetingDate, venueCode]
+  );
+  return rows.map((row) => ({
+    race_no: Number(row.race_no),
+    picks: row.picks_json ?? null,
+    created_at_utc: row.created_at ? new Date(row.created_at).toISOString() : null,
+  }));
 }
 
 export async function getCouncilStatus({ meetingDate, venueCode, raceNo }) {

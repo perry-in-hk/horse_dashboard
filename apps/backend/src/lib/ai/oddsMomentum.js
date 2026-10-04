@@ -3,6 +3,8 @@
  * large implied-money drops (odds falling) near request time.
  */
 
+import { trendLineForSnapshotCount } from "./councilPacket.js";
+
 const TOP_N = 8;
 
 const HKT_TIME = new Intl.DateTimeFormat("en-GB", {
@@ -102,10 +104,7 @@ export async function buildOddsMomentumPromptBlock(pool, key) {
   );
 
   if (rows.length < 2) {
-    return (
-      "### Odds momentum (server-computed, 短時間賠率變化)\n" +
-      `_資料不足：此場在過去約 ${windowMin} 分鐘內少於 2 筆快照，無法計算相鄰時間點之賠率跌幅。請在 Realtime 提高同步頻率或確認已有儲存快照。_\n`
-    );
+    return `${trendLineForSnapshotCount(rows.length)}\n`;
   }
 
   const times = rows.map((r) => new Date(r.observed_at).getTime());
