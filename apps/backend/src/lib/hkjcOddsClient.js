@@ -90,6 +90,48 @@ export async function fetchRaceRunnersForRace(meetingDate, venueCode, raceNo) {
   return runners;
 }
 
+function positiveInt(value) {
+  const n = parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Racecard fields the AI board needs and the runners endpoint does not return:
+ * race distance and barrier draw. Names and horse numbers match WIN combString.
+ * @param {string} date
+ * @param {string} venueCode
+ */
+export async function fetchMeetingRacecardBrief(date, venueCode) {
+  const meeting = await fetchMeetingWithRunners(date, venueCode);
+  if (!meeting) return null;
+  const races = (meeting.races ?? [])
+    .map((race) => {
+      const no = positiveInt(race?.no);
+      if (!no) return null;
+      const distance = positiveInt(race?.distance);
+      const runners = (race.runners ?? [])
+        .map((ru) => {
+          const base = normalizeRacecardRunner(ru);
+          const nameCh = String(ru?.name_ch ?? "").trim().replace(/\s+/g, " ");
+          return {
+            ...base,
+            horse_name: nameCh || base.horse_name,
+            draw: positiveInt(ru?.barrierDrawNumber),
+          };
+        })
+        .filter((ru) => ru.horse_code || ru.no);
+      return {
+        no,
+        distance,
+        postTime: race?.postTime ?? null,
+        status: race?.status ?? null,
+        runners,
+      };
+    })
+    .filter(Boolean);
+  return { races };
+}
+
 function poolHasNodes(pool) {
   return Array.isArray(pool?.oddsNodes) && pool.oddsNodes.length > 0;
 }

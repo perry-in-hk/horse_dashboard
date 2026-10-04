@@ -2693,3 +2693,209 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* === AI race board (智能分析 main view) =================================== */
+.ai-board {
+  margin-bottom: 16px;
+}
+
+.ai-board-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 18px;
+  margin-bottom: 14px;
+}
+
+.ai-board-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.ai-board-day {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.ai-board-note {
+  flex: 1 1 220px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.ai-board-meeting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+}
+
+.ai-board-meeting select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.ai-board-table-wrap {
+  overflow-x: auto;
+}
+
+.ai-board-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ai-board-table th,
+.ai-board-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-medium);
+  vertical-align: top;
+}
+
+.ai-board-table th {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.ai-board-table tr.is-selected td {
+  background: var(--bg-selected);
+}
+
+.ai-board-race-btn {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ai-board-horse {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+}
+
+.ai-board-no {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  min-width: 1.5em;
+}
+
+.ai-board-name {
+  font-weight: 600;
+}
+
+.ai-board-odds {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.ai-board-missing {
+  color: var(--text-muted);
+}
+
+.ai-board-when {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-board-caveat {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-board-form-row td {
+  background: var(--bg-overlay);
+}
+
+.ai-board-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-board-form-card {
+  border: 1px solid var(--border-medium);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--bg-page);
+}
+
+.ai-board-form-title {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.ai-board-form-name {
+  margin: 4px 0 8px;
+  font-weight: 700;
+}
+
+.ai-board-form-dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.ai-board-form-dl div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.ai-board-form-dl dt {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.ai-board-form-dl dd {
+  margin: 0;
+}
+
+.ai-board-council {
+  margin-top: 8px;
+}
+
+.ai-board-council-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  padding: 14px 16px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.ai-board-council-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-board-council[open] .ai-board-council-summary {
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.ai-board-council .ai-council-layout {
+  padding: 0 16px 16px;
+}
+
+@media (max-width: 720px) {
+  .ai-board-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
