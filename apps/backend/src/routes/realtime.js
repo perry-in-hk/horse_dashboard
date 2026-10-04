@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db.js";
-import { fetchRaceRunnersForRace, getHorseRacingApi } from "../lib/hkjcOddsClient.js";
+import { fetchMeetingRacecardBrief, fetchRaceRunnersForRace, getHorseRacingApi } from "../lib/hkjcOddsClient.js";
 import {
   getActiveIntervalTarget,
   getActiveIntervalTargets,
@@ -110,6 +110,58 @@ router.get("/race-runners", async (req, res, next) => {
       return res.status(404).json({ error: "Meeting or race not found" });
     }
     res.json({ runners });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Distance, draw, and runner names for the AI board. Does not include odds. */
+router.get("/racecard-brief", async (req, res, next) => {
+  try {
+    const parsed = meetingKeyQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+    }
+    const q = parsed.data;
+    const brief = await fetchMeetingRacecardBrief(q.meeting_date, q.venue_code);
+    if (!brief) return res.status(404).json({ error: "Meeting or race not found" });
+    res.json(brief);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * One stored odds snapshot for pre-off prices.
+ * `before` (ISO) keeps only snapshots strictly earlier than post time.
+ * Omit `before` when post time is unknown; the latest stored snapshot is returned.
+ * Missing rows are `{ snapshot: null }`, not a 404, so the board can show 未有開跑前報價.
+ */
+router.get("/preoff-win", async (req, res, next) => {
+  try {
+    const parsed = raceKeyQuery
+      .extend({ before: z.string().optional() })
+      .safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Bad query", details: parsed.error.flatten() });
+    }
+    const q = parsed.data;
+    if (q.before && Number.isNaN(Date.parse(q.before))) {
+      return res.status(400).json({ error: "Invalid before timestamp" });
+    }
+    const params = [q.meeting_date, q.venue_code, q.race_no];
+    let sql = `SELECT observed_at, payload
+       FROM hkjc_odds_snapshots
+       WHERE meeting_date = $1::date AND venue_code = $2 AND race_no = $3`;
+    if (q.before) {
+      sql += ` AND observed_at < $4::timestamptz`;
+      params.push(q.before);
+    }
+    sql += ` ORDER BY observed_at DESC LIMIT 1`;
+    const r = await pool.query(sql, params);
+    const row = r.rows[0];
+    if (!row) return res.json({ snapshot: null });
+    res.json({ snapshot: { observed_at: row.observed_at, payload: row.payload } });
   } catch (e) {
     next(e);
   }
