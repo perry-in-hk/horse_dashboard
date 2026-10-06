@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { COUNCIL_AGENTS } from "./src/lib/ai/council/agents.js";
 import { parseCouncilPicks } from "./src/lib/ai/council/picksSchema.js";
@@ -9,6 +10,18 @@ import {
   shapeRunnersForPacket,
   trendLineForSnapshotCount,
 } from "./src/lib/ai/councilPacket.js";
+
+test("recent form query keeps weight, margin, and running position inside the CTE", () => {
+  const src = readFileSync(new URL("./src/lib/ai/buildRaceContext.js", import.meta.url), "utf8");
+  const cteStart = src.indexOf("WITH ranked AS");
+  const outerFrom = src.indexOf("FROM ranked", cteStart);
+  assert.ok(cteStart > 0 && outerFrom > cteStart);
+  const cte = src.slice(cteStart, outerFrom);
+  assert.match(cte, /mr\.actual_weight/);
+  assert.match(cte, /mr\.declared_weight/);
+  assert.match(cte, /mr\.margin/);
+  assert.match(cte, /mr\.running_positions/);
+});
 
 test("lead prompt requires exactly one WIN first, then other products", () => {
   const system = COUNCIL_AGENTS.bookie.system;

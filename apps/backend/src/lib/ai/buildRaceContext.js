@@ -132,7 +132,7 @@ export async function loadRecentFormRows(db, horseCodes, capPerHorse) {
     `WITH ranked AS (
        SELECT mr.race_date, mr.racecourse, mr.race_no, mr.horse_code, mr.horse_name,
               mr.jockey, mr.trainer, mr.finish_position, mr.finish_time, mr.win_odds, mr.draw,
-              mr.race_distance,
+              mr.race_distance, mr.actual_weight, mr.declared_weight, mr.margin, mr.running_positions,
               ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(mr.horse_code, '')
                 ORDER BY COALESCE(mr.race_date, DATE '1900-01-01') DESC, mr.race_no DESC NULLS LAST
