@@ -107,6 +107,30 @@ export function listRoundNumbers(messages) {
 }
 
 /** positive | negative | none. none is no discussion, or discussion without a clear view. */
+export function horseNoteFor(horseNo, { messages, picks, roundNo } = {}) {
+  const wanted = Number(horseNo);
+  const round = Number(roundNo);
+  const filterRound = Number.isFinite(round) && round > 0;
+  const collected = [];
+  for (const message of messages ?? []) {
+    const meta = message?.meta_json ?? {};
+    if (!Array.isArray(meta.horse_notes)) continue;
+    const speaker = String(meta.speaker || meta.agent_code || "").toLowerCase();
+    if (speaker && speaker !== "bookie") continue;
+    const messageRound = Number(meta.round_no ?? 0);
+    if (filterRound && messageRound !== round) continue;
+    collected.push(...meta.horse_notes);
+  }
+  let notes = collected;
+  if (!notes.length) {
+    const picksRound = Number(picks?._status?.round_no ?? 0);
+    if (!filterRound || !picksRound || picksRound === round) {
+      notes = Array.isArray(picks?.horse_notes) ? picks.horse_notes : [];
+    }
+  }
+  return notes.find((note) => Number(note?.horse_no) === wanted) ?? null;
+}
+
 export function horseNameView(quotes) {
   let pos = 0;
   let neg = 0;

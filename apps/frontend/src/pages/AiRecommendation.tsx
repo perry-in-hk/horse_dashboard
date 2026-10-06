@@ -862,6 +862,7 @@ export default function AiRecommendation() {
           <span className="ai-picks-row-badges">
             {r.count > 1 && <span className="ai-picks-badge">×{r.count}</span>}
             {r.ev_status === "negative" && <span className="ai-picks-badge warn">EV−</span>}
+            {r.ev_status === "low_confidence" && <span className="ai-picks-badge warn">低信心</span>}
             {hasFix && <span className="ai-picks-badge fix">系統修正</span>}
           </span>
         </div>

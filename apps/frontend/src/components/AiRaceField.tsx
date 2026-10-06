@@ -3,9 +3,8 @@ import { apiFetch } from "../api/client.ts";
 import {
   NO_MEETING_PICK,
   NOT_MENTIONED,
-  commentsForHorse,
   followOnLines,
-  horseNameView,
+  horseNoteFor,
   listRoundNumbers,
   winSuggestion,
 } from "../lib/councilPickDisplay.js";
@@ -16,6 +15,8 @@ type MeetingRef = { date?: string; venueCode?: string; source?: string };
 type PickBlob = {
   others?: { product?: string; combo?: string; reason_zh?: string; reason_en?: string; odds?: string }[];
   qpl?: { combo?: string; reason_zh?: string; reason_en?: string; product?: string; odds?: string }[];
+  horse_notes?: { horse_no: number; summary_zh: string; buy_zh: string; stake_zh: string; view?: string }[];
+  _status?: { round_no?: number };
 };
 
 type MeetingPicksResponse = {
@@ -325,12 +326,12 @@ export default function AiRaceField({
                     {runnersLoading ? <p className="muted">載入排位…</p> : null}
                     {runnersNote ? <p className="muted">{runnersNote}</p> : null}
                     {fieldRunners.map((runner) => {
-                      const quotes = commentsForHorse(runner.no, {
+                      const note = horseNoteFor(runner.no, {
                         messages: open ? messages : [],
                         picks: !rounds.length || selectedRound === latestRound ? picks : null,
                         roundNo: rounds.length ? selectedRound : undefined,
                       });
-                      const view = horseNameView(quotes);
+                      const view = note?.view === "positive" || note?.view === "negative" ? note.view : "none";
                       const suggested = win?.horseNo === runner.no;
                       return (
                         <article key={runner.no} className={`ai-horse-card ${suggested ? "is-suggestion" : ""}`}>
@@ -342,19 +343,14 @@ export default function AiRaceField({
                           <p className="ai-horse-meta">
                             騎師 {runner.jockey || "—"} · 檔位 {runner.draw || "—"}
                           </p>
-                          {quotes.length === 0 ? (
-                            <p className="ai-horse-silent">{NOT_MENTIONED}</p>
+                          {note ? (
+                            <>
+                              <p className="ai-horse-summary">{note.summary_zh}</p>
+                              <p className="ai-horse-buy">買：{note.buy_zh}</p>
+                              <p className="ai-horse-stake">{note.stake_zh}</p>
+                            </>
                           ) : (
-                            <ul className="ai-horse-quotes">
-                              {quotes.map((quote, index) => (
-                                <li key={`${quote.kind}-${index}`}>
-                                  <span className="ai-horse-quote-src">
-                                    {quote.kind === "pick" ? quote.product || "建議" : quote.speaker || "發言"}
-                                  </span>
-                                  {quote.text}
-                                </li>
-                              ))}
-                            </ul>
+                            <p className="ai-horse-silent">{NOT_MENTIONED}</p>
                           )}
                         </article>
                       );

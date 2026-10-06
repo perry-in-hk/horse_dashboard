@@ -2736,7 +2736,9 @@ body {
 .ai-horse-card { border: 1px solid var(--border-medium); border-radius: 12px; padding: 10px 12px; background: var(--bg-overlay); }
 .ai-horse-card.is-suggestion { border-color: var(--color-accent, var(--border-strong)); }
 .ai-horse-card header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.ai-horse-meta, .ai-horse-silent { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; }
+.ai-horse-meta, .ai-horse-silent, .ai-horse-summary, .ai-horse-buy, .ai-horse-stake { margin: 6px 0 0; font-size: 12px; }
+.ai-horse-meta, .ai-horse-silent { color: var(--text-muted); }
+.ai-horse-summary, .ai-horse-buy, .ai-horse-stake { color: var(--text-secondary); }
 .ai-horse-quotes { margin: 8px 0 0; padding-left: 16px; font-size: 12px; }
 .ai-horse-quote-src { display: inline-block; margin-right: 6px; color: var(--text-muted); }
 .ai-board-council { margin-top: 8px; }

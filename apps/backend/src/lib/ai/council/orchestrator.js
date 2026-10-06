@@ -76,6 +76,18 @@ function buildAllPoolsText(context) {
   return blocks.join("\n");
 }
 
+function formatRawFormLine(row) {
+  const date = String(row?.race_date ?? "").slice(0, 10) || "-";
+  const course = String(row?.racecourse ?? "").trim() || "-";
+  const distance = row?.race_distance != null && row.race_distance !== "" ? `${row.race_distance}m` : "-";
+  const position = String(row?.finish_position ?? "").trim() || "-";
+  const draw = String(row?.draw ?? "").trim() || "-";
+  const weight = String(row?.actual_weight ?? row?.declared_weight ?? "").trim() || "-";
+  const margin = String(row?.margin ?? "").trim() || "-";
+  const running = String(row?.running_positions ?? "").trim() || "-";
+  return `  ${date} ${course} ${distance} 名次=${position} 檔位=${draw} 負磅=${weight} 頭馬距離=${margin} 走位=${running}`;
+}
+
 function buildFormSummary(context) {
   const formByHorse = Array.isArray(context?.formByHorse) ? context.formByHorse : [];
   const runners = Array.isArray(context?.runners) ? context.runners : [];
@@ -84,7 +96,7 @@ function buildFormSummary(context) {
       .map((r) => [String(r?.horse_code ?? "").trim().toUpperCase(), parseHorseNo(r?.no)])
       .filter((x) => x[0] && x[1] != null)
   );
-  const lines = [];
+  const blocks = [];
   for (const horse of formByHorse) {
     const code = String(horse?.horse_code ?? "").trim().toUpperCase();
     const horseNo = noByCode.get(code);
@@ -92,13 +104,10 @@ function buildFormSummary(context) {
     const horseName = String(horse?.horse_name ?? code).trim();
     const allRows = Array.isArray(horse?.rows) ? horse.rows : [];
     const rows = allRows.slice(0, 5);
-    const posSeq = rows.map((r) => String(r?.finish_position ?? "-").trim()).join("/");
-    const scores = rows.map((r) => Number(r?.race_score)).filter((n) => Number.isFinite(n));
-    const avgScore = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : "-";
     const runner = runners.find(
       (r) => String(r?.horse_code ?? "").trim().toUpperCase() === code
     );
-    lines.push(
+    const lines = [
       formatFormHorseLine({
         horseNo,
         horseName,
@@ -107,20 +116,56 @@ function buildFormSummary(context) {
         venue: runner?.venue || context?.venue_code || "",
         rows: allRows,
         distance: context?.race_distance ?? null,
-        recent: `${posSeq || "-"} avgScore ${avgScore} n=${rows.length}`,
-      })
-    );
+        recent: rows.length ? `${rows.length} 仗原始近績見下一行` : "",
+      }),
+    ];
+    if (rows.length) {
+      for (const row of rows) lines.push(formatRawFormLine(row));
+    } else {
+      lines.push("  (no form rows)");
+    }
+    blocks.push({ horseNo, text: lines.join("\n") });
   }
-  lines.sort((a, b) => {
-    const na = parseHorseNo(a.match(/^#(\d+)/)?.[1]);
-    const nb = parseHorseNo(b.match(/^#(\d+)/)?.[1]);
-    if (!na && !nb) return 0;
-    if (!na) return 1;
-    if (!nb) return -1;
-    return na - nb;
-  });
-  const body = lines.length ? lines.join("\n") : "- (no form rows)";
+  blocks.sort((a, b) => a.horseNo - b.horseNo);
+  const body = blocks.length ? blocks.map((block) => block.text).join("\n") : "- (no form rows)";
   return `${body}\nwin_odds 為過往結算賠率，不是今場開跑前報價。`;
+}
+
+const TAKEOUT = 0.175;
+
+function marketChancePct(odds) {
+  const n = Number(odds);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return ((100 / n) * (1 - TAKEOUT)).toFixed(1);
+}
+
+function buildMarketChanceText(context) {
+  const lines = [
+    "抽成約 17.5% 已在賠率內。市場機會 = (1/賠率)×(1-0.175)，單位是百分點。",
+    "差價 = 你的機會 − 市場機會。差價≤0，或沒有賠率，就是低信心、注碼 0。",
+    "差價>0 時注碼 = min(1, (你的機會小數×賠率−1)/(賠率−1))，寫成「建議 0.4 注」。",
+  ];
+  const win = context?.oddsSummary?.win ?? {};
+  const winLines = Object.entries(win)
+    .map(([comb, odds]) => {
+      const pct = marketChancePct(odds);
+      return pct == null ? null : `#${String(comb).replace(/^0+/, "") || comb} 獨贏 ${odds} 倍，市場機會 ${pct}%`;
+    })
+    .filter(Boolean);
+  lines.push("", "[獨贏市場機會]");
+  lines.push(winLines.length ? winLines.join("\n") : `- (${NO_PREOFF_QUOTE})`);
+  const qpl = Array.isArray(context?.pairPools?.qpl) ? context.pairPools.qpl.slice(0, 12) : [];
+  const qplLines = qpl
+    .map((row) => {
+      const pct = marketChancePct(row?.odds);
+      const comb = String(row?.comb ?? "").trim();
+      if (!comb || pct == null) return null;
+      return `${comb} 位置Q ${row.odds} 倍，市場機會 ${pct}%`;
+    })
+    .filter(Boolean);
+  lines.push("", "[位置Q市場機會]");
+  lines.push(qplLines.length ? qplLines.join("\n") : `- (${NO_PREOFF_QUOTE})`);
+  return lines.join("\n");
 }
 
 function buildContextText(context) {
@@ -136,6 +181,9 @@ function buildContextText(context) {
       "",
       "### OddsSummary",
       `source=${String(oddsSummary.source ?? "none")}, observed_at=${String(oddsSummary.observed_at ?? "-")}, note=${String(oddsSummary.note || (oddsSummary.preoff ? "" : NO_PREOFF_QUOTE))}`,
+      "",
+      "### MarketChance",
+      buildMarketChanceText(context),
       "",
       "### PairPools",
       buildPairPoolsText(context),
@@ -249,14 +297,15 @@ function buildFallbackPicks(context) {
     summary_zh: "Bookie JSON 輸出異常，已採用保底建議（請人工覆核）。",
     summary_en: "Bookie JSON output invalid; fallback picks applied (manual review advised).",
     qpl: [
-      { combo: mk(a, b), odds: "", ev_status: "positive", reason_zh: "保底配對 1", reason_en: "Fallback pair 1" },
-      { combo: mk(a, c), odds: "", ev_status: "positive", reason_zh: "保底配對 2", reason_en: "Fallback pair 2" },
-      { combo: mk(b, c), odds: "", ev_status: "positive", reason_zh: "保底配對 3", reason_en: "Fallback pair 3" },
+      { combo: mk(a, b), odds: "", ev_status: "low_confidence", reason_zh: `${mk(a, b)}。未有開跑前報價。低信心，不落注。`, reason_en: "No pre-off quote. Low confidence, no stake." },
+      { combo: mk(a, c), odds: "", ev_status: "low_confidence", reason_zh: `${mk(a, c)}。未有開跑前報價。低信心，不落注。`, reason_en: "No pre-off quote. Low confidence, no stake." },
+      { combo: mk(b, c), odds: "", ev_status: "low_confidence", reason_zh: `${mk(b, c)}。未有開跑前報價。低信心，不落注。`, reason_en: "No pre-off quote. Low confidence, no stake." },
     ],
     others: [
-      { product: "WIN", combo: String(a), odds: "", ev_status: "positive", reason_zh: "保底獨贏", reason_en: "Fallback WIN" },
-      { product: "QIN", combo: mk(a, d), odds: "", ev_status: "positive", reason_zh: "保底位置Q", reason_en: "Fallback QIN" },
+      { product: "WIN", combo: String(a), odds: "", ev_status: "low_confidence", reason_zh: `#${a}。未有開跑前報價。低信心，不落注。`, reason_en: "No pre-off quote. Low confidence, no stake." },
+      { product: "QIN", combo: mk(a, d), odds: "", ev_status: "low_confidence", reason_zh: "低信心，不落注。", reason_en: "Low confidence, no stake." },
     ],
+    horse_notes: [],
     confidence: 0.2,
     data_freshness: "fallback",
     updated_at_utc: "",
@@ -437,16 +486,18 @@ function buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }
       summary_zh: "主推 QPL 組合，並覆蓋 WIN/PLA/QIN/FCT/TRI 各一注。",
       summary_en: "Primary QPL combos with WIN/PLA/QIN/FCT/TRI coverage.",
       qpl: [
-        { combo: mk(a, b), odds: "6.5", ev_status: "positive", reason_zh: "賠率支持且近況佳", reason_en: "Odds support and good recent form" },
-        { combo: mk(a, c), odds: "9.2", ev_status: "neutral", reason_zh: "次選配對", reason_en: "Secondary pair" },
-        { combo: mk(b, c), odds: "11.0", ev_status: "neutral", reason_zh: "防冷配對", reason_en: "Cover pair" },
+        { combo: mk(a, b), odds: "6.5", ev_status: "positive", reason_zh: `${mk(a, b)}。兩匹都入位置的機會 22%。位置Q 6.5 倍，扣約 17.5% 抽成後市場大約 13%。差約 9 個百分點。建議 0.3 注。`, reason_en: "Both-place chance 22% versus takeout-adjusted market 13%. Stake 0.3." },
+        { combo: mk(a, c), odds: "9.2", ev_status: "low_confidence", reason_zh: `${mk(a, c)}。兩匹都入位置的機會 8%。位置Q 9.2 倍，扣抽成後市場大約 9%。差價蓋不住抽成。低信心，不落注。`, reason_en: "Edge does not cover takeout. Low confidence, no stake." },
+        { combo: mk(b, c), odds: "11.0", ev_status: "low_confidence", reason_zh: `${mk(b, c)}。差價蓋不住抽成。低信心，不落注。`, reason_en: "Low confidence, no stake." },
       ],
       others: [
-        { product: "WIN", combo: String(a), odds: "3.4", ev_status: "positive", reason_zh: "#馬號 大熱可信", reason_en: "Reliable favourite" },
-        { product: "PLA", combo: String(b), odds: "2.1", ev_status: "positive", reason_zh: "#馬號 位置穩定", reason_en: "Consistent placer" },
-        { product: "QIN", combo: mk(a, d), odds: "18.0", ev_status: "neutral", reason_zh: "搏冷", reason_en: "Value longshot" },
-        { product: "FCT", combo: `${a}-${b}`, odds: "12.0", ev_status: "neutral", reason_zh: "順序二重彩：#前者先入", reason_en: "Forecast with leader first" },
-        { product: "TRI", combo: [a, b, c].join("-"), odds: "30.0", ev_status: "neutral", reason_zh: "三匹入三甲組合", reason_en: "Trio of top-three candidates" },
+        { product: "WIN", combo: String(a), odds: "8.5", ev_status: "positive", reason_zh: `#${a}。贏面 18%。獨贏 8.5 倍，扣約 17.5% 抽成後市場大約 10%。差約 8 個百分點。建議 0.4 注。騎師見 RunnersTable，檔位見 RunnersTable。`, reason_en: "Win chance 18% versus takeout-adjusted market 10%. Stake 0.4." },
+        { product: "PLA", combo: String(b), odds: "2.1", ev_status: "low_confidence", reason_zh: `#${b}。差價蓋不住抽成。低信心，不落注。`, reason_en: "Low confidence, no stake." },
+        { product: "QIN", combo: mk(a, d), odds: "18.0", ev_status: "low_confidence", reason_zh: "低信心，不落注。", reason_en: "Low confidence, no stake." },
+      ],
+      horse_notes: [
+        { horse_no: a, summary_zh: "本輪看好，獨贏差價蓋得住抽成。", buy_zh: "獨贏", stake_zh: "建議 0.4 注", view: "positive" },
+        { horse_no: b, summary_zh: "和主獨贏組成位置Q，這匹本身不另買獨贏。", buy_zh: `位置Q ${mk(a, b)}`, stake_zh: "建議 0.3 注", view: "positive" },
       ],
       confidence: 0.62,
       data_freshness: "realtime",
@@ -504,7 +555,9 @@ function buildBookieRoundPrompt({
     buildBookieJsonExample({ validHorseNos, latestUserSeq, shouldFinalize }),
     "",
     `combo 只能使用本場合法馬號：${(validHorseNos ?? []).join(", ") || "(見 RunnersTable)"}。`,
-    "qpl 三筆 combo 不可重複。",
+    "qpl 三筆 combo 不可重複。第一筆是主位置Q，reason_zh 要寫兩匹都入位置的機會、位置Q賠率、扣約 17.5% 抽成後的市場機會、差價。差價不大於 0 就 ev_status=low_confidence，結尾「低信心，不落注。」",
+    "獨贏 reason_zh 要寫贏面、獨贏賠率、扣抽成後市場、差價，並提到騎師、檔位或場地。不夠就 low_confidence，注碼 0，但馬號仍然要留。",
+    "沒有算過差價不得標 positive。horse_notes 只列本輪發言提到的馬：summary_zh、buy_zh（獨贏或位置Q 組合）、stake_zh、view。",
     "others 需 4-5 筆、每筆 product 不同，覆蓋至少 4 種產品（WIN/PLA/QIN/FCT/TCE/TRI/FF/QTT/DBL 中挑選）；腳數：WIN/PLA=1、QIN/QPL/DBL/FCT=2、TCE/TRI=3、FF/QTT=4；FCT/TCE/QTT 順序即名次。",
     "member_verdicts 必須涵蓋本輪每位有發言的成員；重複舊內容或空白發言一律 reject。",
     "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。",

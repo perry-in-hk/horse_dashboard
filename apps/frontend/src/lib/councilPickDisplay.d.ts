@@ -31,6 +31,23 @@ export function listRoundNumbers(
 
 export function horseNameView(quotes?: HorseQuote[]): HorseNameView;
 
+export type HorseNote = {
+  horse_no: number;
+  summary_zh: string;
+  buy_zh: string;
+  stake_zh: string;
+  view?: "positive" | "negative" | "none" | string;
+};
+
+export function horseNoteFor(
+  horseNo: number,
+  input?: {
+    messages?: { meta_json?: Record<string, unknown> }[];
+    picks?: { horse_notes?: HorseNote[]; _status?: { round_no?: number } } | null;
+    roundNo?: number;
+  }
+): HorseNote | null;
+
 export function commentsForHorse(
   horseNo: number,
   input?: {

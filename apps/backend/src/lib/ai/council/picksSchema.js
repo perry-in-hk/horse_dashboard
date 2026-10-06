@@ -28,14 +28,51 @@ function toProduct(v, fallback = "WIN") {
   return COUNCIL_PRODUCTS.includes(p) ? p : fallback;
 }
 
+function normalizeEvStatus(raw) {
+  const value = toText(raw, "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (value === "positive" || value === "negative" || value === "low_confidence") return value;
+  if (value === "low" || value === "not_confident") return "low_confidence";
+  return "low_confidence";
+}
+
+function normalizeView(raw) {
+  const value = toText(raw, "").toLowerCase();
+  if (value === "positive" || value === "negative" || value === "none") return value;
+  return "none";
+}
+
+function normalizeHorseNotes(raw) {
+  const rows = Array.isArray(raw) ? raw : [];
+  const notes = [];
+  const seen = new Set();
+  for (const item of rows) {
+    const obj = item && typeof item === "object" ? item : {};
+    const horseNo = Number.parseInt(String(obj.horse_no ?? obj.horseNo ?? obj.no ?? "").trim(), 10);
+    const summary = toText(obj.summary_zh ?? obj.summary, "");
+    const buy = toText(obj.buy_zh ?? obj.buy, "");
+    const stake = toText(obj.stake_zh ?? obj.stake, "");
+    if (!Number.isFinite(horseNo) || horseNo <= 0 || seen.has(horseNo)) continue;
+    if (!summary || !buy || !stake) continue;
+    seen.add(horseNo);
+    notes.push({
+      horse_no: horseNo,
+      summary_zh: summary,
+      buy_zh: buy,
+      stake_zh: stake,
+      view: normalizeView(obj.view),
+    });
+  }
+  return notes;
+}
+
 function normalizePickRow(raw, defaultProduct = null) {
   const obj = raw && typeof raw === "object" ? raw : {};
-  const reasonZh = toText(obj.reason_zh ?? obj.reasonZh ?? obj.reason ?? obj.rationale_zh, "模型建議");
-  const reasonEn = toText(obj.reason_en ?? obj.reasonEn ?? obj.reason ?? obj.rationale_en, "Model suggestion");
+  const reasonZh = toText(obj.reason_zh ?? obj.reasonZh ?? obj.reason ?? obj.rationale_zh, "低信心，不落注。");
+  const reasonEn = toText(obj.reason_en ?? obj.reasonEn ?? obj.reason ?? obj.rationale_en, "Low confidence, no stake.");
   const row = {
     combo: toText(obj.combo ?? obj.combination ?? obj.horses ?? obj.horse_numbers ?? obj.horseNos, "待定"),
     odds: toText(obj.odds ?? obj.odd ?? obj.market_odds, ""),
-    ev_status: toText(obj.ev_status ?? obj.evStatus ?? obj.value_status, "positive").toLowerCase() === "negative" ? "negative" : "positive",
+    ev_status: normalizeEvStatus(obj.ev_status ?? obj.evStatus ?? obj.value_status),
     reason_zh: reasonZh,
     reason_en: reasonEn,
   };
@@ -163,7 +200,7 @@ function pickUniqueSingle(validHorseNos, usedCombos) {
 const pickRow = z.object({
   combo: z.string().min(1),
   odds: z.string().optional().default(""),
-  ev_status: z.enum(["positive", "negative"]).default("positive"),
+  ev_status: z.enum(["positive", "negative", "low_confidence"]).default("low_confidence"),
   reason_zh: z.string().min(1),
   reason_en: z.string().min(1),
 });
@@ -184,6 +221,18 @@ export const councilPicksSchema = z.object({
   data_freshness: z.string().min(1).optional().default("snapshot"),
   updated_at_utc: z.string().optional().default(""),
   updated_at_hkt: z.string().optional().default(""),
+  horse_notes: z
+    .array(
+      z.object({
+        horse_no: z.number().int().positive(),
+        summary_zh: z.string().min(1),
+        buy_zh: z.string().min(1),
+        stake_zh: z.string().min(1),
+        view: z.enum(["positive", "negative", "none"]),
+      })
+    )
+    .optional()
+    .default([]),
 });
 
 export function parseCouncilPicks(raw, validHorseNos = []) {
@@ -216,9 +265,9 @@ export function parseCouncilPicks(raw, validHorseNos = []) {
     qpl.push({
       combo,
       odds: "",
-      ev_status: "positive",
-      reason_zh: "等待議會共識",
-      reason_en: "Awaiting council consensus",
+      ev_status: "low_confidence",
+      reason_zh: "低信心，不落注。",
+      reason_en: "Low confidence, no stake.",
     });
   }
 
@@ -254,9 +303,9 @@ export function parseCouncilPicks(raw, validHorseNos = []) {
     others.push({
       combo,
       odds: "",
-      ev_status: "positive",
-      reason_zh: "等待議會共識",
-      reason_en: "Awaiting council consensus",
+      ev_status: "low_confidence",
+      reason_zh: "低信心，不落注。",
+      reason_en: "Low confidence, no stake.",
       product,
     });
   }
@@ -273,6 +322,7 @@ export function parseCouncilPicks(raw, validHorseNos = []) {
     data_freshness: toText(obj.data_freshness ?? obj.dataFreshness, "snapshot"),
     updated_at_utc: toText(obj.updated_at_utc ?? obj.updatedAtUtc, ""),
     updated_at_hkt: toText(obj.updated_at_hkt ?? obj.updatedAtHkt, ""),
+    horse_notes: normalizeHorseNotes(obj.horse_notes ?? obj.horseNotes),
   };
   return councilPicksSchema.safeParse(normalized);
 }

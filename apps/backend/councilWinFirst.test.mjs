@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { COUNCIL_AGENTS } from "./src/lib/ai/council/agents.js";
+import { parseCouncilPicks } from "./src/lib/ai/council/picksSchema.js";
 import {
   NO_PREOFF_QUOTE,
   buildPreOffOddsSummary,
@@ -19,6 +20,30 @@ test("lead prompt requires exactly one WIN first, then other products", () => {
   assert.match(system, /未有臨場/);
   assert.match(system, /未有開跑前報價/);
   assert.match(system, /禁止用過往結算或賽果 win_odds/);
+  assert.match(system, /主位置Q/);
+  assert.match(system, /low_confidence/);
+  assert.match(system, /horse_notes/);
+  assert.match(system, /低信心，不落注/);
+});
+
+test("missing edge is low confidence, and horse notes are kept", () => {
+  const parsed = parseCouncilPicks(
+    {
+      summary_zh: "本輪",
+      summary_en: "Round",
+      qpl: [{ combo: "1-2", reason_zh: "4-7。低信心，不落注。", reason_en: "Low confidence, no stake." }],
+      others: [{ product: "WIN", combo: "1", reason_zh: "#1。低信心，不落注。", reason_en: "Low confidence, no stake." }],
+      horse_notes: [
+        { horse_no: 1, summary_zh: "差價不夠。", buy_zh: "獨贏", stake_zh: "低信心，不落注", view: "none" },
+      ],
+    },
+    [1, 2, 3, 4]
+  );
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.others[0].ev_status, "low_confidence");
+  assert.equal(parsed.data.qpl[0].ev_status, "low_confidence");
+  assert.equal(parsed.data.horse_notes[0].buy_zh, "獨贏");
+  assert.equal(parsed.data.horse_notes.length, 1);
 });
 
 test("quant, historian, trend, and scout prompts keep the new rules", () => {

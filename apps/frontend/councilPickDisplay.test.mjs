@@ -6,6 +6,7 @@ import {
   commentsForHorse,
   followOnLines,
   horseNameView,
+  horseNoteFor,
   listRoundNumbers,
   messageMentionsHorse,
   winSuggestion,
@@ -65,4 +66,35 @@ test("horse cards follow the selected round and color the name by view", () => {
   assert.equal(horseNameView(commentsForHorse(2, { messages, roundNo: 1 })), "none");
   assert.equal(horseNameView(commentsForHorse(8, { messages, roundNo: 1 })), "negative");
   assert.equal(commentsForHorse(4, { messages, roundNo: 1 }).some((quote) => quote.text.includes("降權")), false);
+});
+
+test("horse card uses the selected round summary instead of the quote list", () => {
+  const messages = [
+    {
+      role: "agent",
+      meta_json: {
+        speaker: "bookie",
+        round_no: 1,
+        horse_notes: [
+          { horse_no: 4, summary_zh: "第一輪看好。", buy_zh: "獨贏", stake_zh: "建議 0.4 注", view: "positive" },
+        ],
+      },
+    },
+    {
+      role: "agent",
+      meta_json: {
+        speaker: "bookie",
+        round_no: 2,
+        horse_notes: [
+          { horse_no: 4, summary_zh: "第二輪差價不夠。", buy_zh: "獨贏", stake_zh: "低信心，不落注", view: "none" },
+        ],
+      },
+    },
+  ];
+  const first = horseNoteFor(4, { messages, roundNo: 1 });
+  const second = horseNoteFor(4, { messages, roundNo: 2 });
+  assert.equal(first.summary_zh, "第一輪看好。");
+  assert.equal(first.stake_zh, "建議 0.4 注");
+  assert.equal(second.stake_zh, "低信心，不落注");
+  assert.equal(horseNoteFor(8, { messages, roundNo: 1 }), null);
 });

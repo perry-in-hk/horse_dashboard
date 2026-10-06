@@ -140,9 +140,10 @@ export async function loadRecentFormRows(db, horseCodes, capPerHorse) {
        FROM (${MERGED_RACE_FLAT}) AS mr
        WHERE mr.horse_code = ANY($1::text[])
      )
-     SELECT race_date, racecourse, race_no, horse_code, horse_name, jockey, trainer,
-            finish_position, finish_time, win_odds, draw, race_distance
-     FROM ranked WHERE rn <= $2
+    SELECT race_date, racecourse, race_no, horse_code, horse_name, jockey, trainer,
+           finish_position, finish_time, win_odds, draw, race_distance,
+           actual_weight, declared_weight, margin, running_positions
+    FROM ranked WHERE rn <= $2
      ORDER BY horse_code, race_date DESC, race_no DESC NULLS LAST`,
     [codes, capPerHorse]
   );

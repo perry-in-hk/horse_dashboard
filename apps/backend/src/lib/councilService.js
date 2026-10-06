@@ -927,6 +927,7 @@ async function runChatroomRound({ meetingDate, venueCode, raceNo, state }) {
       member_verdicts: round.bookie_turn.member_verdicts ?? [],
       ruling_zh: round.bookie_turn.ruling_zh ?? "",
       directives: round.bookie_turn.directives ?? [],
+      horse_notes: round.bookie_turn.picks?.horse_notes ?? [],
       user_disposition: round.bookie_turn.user_disposition,
       is_interim: !round.bookie_turn.is_final,
       is_final: Boolean(round.bookie_turn.is_final),
