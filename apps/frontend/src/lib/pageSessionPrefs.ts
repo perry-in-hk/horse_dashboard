@@ -49,6 +49,27 @@ export function writeSharedMeetingRace(prefs: SharedMeetingRacePrefs): void {
   writeJson(SHARED_MEETING_RACE_KEY, prefs);
 }
 
+function raceMemoryKey(meetingDate: string, venueCode: string): string {
+  return `hkjc.aiHorseRace:${meetingDate}:${venueCode}`;
+}
+
+export function readRememberedRace(meetingDate: string, venueCode: string): number {
+  try {
+    const n = Number(localStorage.getItem(raceMemoryKey(meetingDate, venueCode)));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function writeRememberedRace(meetingDate: string, venueCode: string, raceNo: number): void {
+  try {
+    localStorage.setItem(raceMemoryKey(meetingDate, venueCode), String(raceNo));
+  } catch {
+    /* private mode or full storage */
+  }
+}
+
 export function readRealtimeSessionPrefs(): Partial<RealtimeSessionPrefs> | null {
   return readJson<Partial<RealtimeSessionPrefs>>(REALTIME_PREFS_KEY);
 }

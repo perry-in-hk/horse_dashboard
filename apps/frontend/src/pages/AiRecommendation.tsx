@@ -7,9 +7,11 @@ import RaceTimeContext from "../components/RaceTimeContext.tsx";
 import OddsSyncChips from "../components/OddsSyncChips.tsx";
 import AiRaceField from "../components/AiRaceField.tsx";
 import {
+  readRememberedRace,
   readSharedMeetingRace,
   resolveMeetingIndex,
   resolveRaceNo,
+  writeRememberedRace,
   writeSharedMeetingRace,
 } from "../lib/pageSessionPrefs.ts";
 import { getCountdownState, parsePostTime } from "../lib/racePostTime.ts";
@@ -345,14 +347,16 @@ export default function AiRecommendation() {
         setMeetings(list);
         const saved = readSharedMeetingRace();
         if (list.length) {
-          setMeetingIdx(resolveMeetingIndex(list, saved));
-          if (saved?.raceNo) {
-            const m = list[resolveMeetingIndex(list, saved)];
-            const nums = (m?.races ?? [])
-              .map((race) => parseInt(String(race.no), 10))
-              .filter((n) => Number.isFinite(n));
-            setRaceNo(resolveRaceNo([...new Set(nums)].sort((a, b) => a - b), saved.raceNo));
-          }
+          const idx = resolveMeetingIndex(list, saved);
+          setMeetingIdx(idx);
+          const m = list[idx];
+          const date = String(m?.date ?? "").slice(0, 10);
+          const venue = String(m?.venueCode ?? "");
+          const nums = (m?.races ?? [])
+            .map((race) => parseInt(String(race.no), 10))
+            .filter((n) => Number.isFinite(n));
+          const remembered = readRememberedRace(date, venue);
+          setRaceNo(resolveRaceNo([...new Set(nums)].sort((a, b) => a - b), remembered || saved?.raceNo));
         }
         if (!list.length) {
           const activeErr = activeResp.status === "rejected" ? activeResp.reason : null;
@@ -406,6 +410,7 @@ export default function AiRecommendation() {
   useEffect(() => {
     if (!meetingDate || !venueCode || !raceNo) return;
     writeSharedMeetingRace({ meetingDate, venueCode, raceNo });
+    writeRememberedRace(meetingDate, venueCode, raceNo);
   }, [meetingDate, venueCode, raceNo]);
 
   const raceKey = useMemo(
