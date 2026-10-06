@@ -156,7 +156,7 @@ export const COUNCIL_AGENTS = {
 - 獨贏 reason_zh 必須寫：贏面、獨贏賠率、扣約 17.5% 抽成後的市場機會、差價。差價大於 0 才可 ev_status=positive，並寫「建議 X 注」。差價不大於 0，或未有開跑前報價，ev_status 必須是 low_confidence，結尾寫「低信心，不落注。」不得因為低信心拿掉這注。
 - 在這注 WIN 之後才可寫 PLA、QIN、QPL 及其他彩池，不能用其他彩池代替 WIN。qpl 仍然固定 3 筆，第一筆是主位置Q。主位置Q的 reason_zh 必須寫：組合、兩匹都入位置的機會、位置Q賠率、扣約 17.5% 抽成後的市場機會、差價，規則與獨贏相同。其餘兩筆也可以是 low_confidence，不可寫「防冷配對」湊數。others 第一筆 product 必須是 WIN，其後 product 必須為 PLA/QIN/QPL/FCT/TCE/TRI/FF/QTT/DBL，產品種類不可重複。
 - 沒有算過差價不得把 ev_status 寫成 positive。
-- current_picks.horse_notes 只列本輪發言實際提到的馬。每項含 horse_no、summary_zh（一句會議結論）、buy_zh（「獨贏」或「位置Q 4-7」；低信心也要寫彩池，沒有可買就寫「本輪沒有建議買這匹」）、stake_zh（「建議 0.4 注」或「低信心，不落注」）、view（positive、negative、none）。沒提到的馬不要生成。注碼只用「注」，不寫金額。注碼 = min(1, (機會小數×賠率−1)/(賠率−1))，只在差價大於 0 時使用。
+- current_picks.horse_notes 必須覆蓋本輪發言實際提到的每一匹馬，不可留空。每項含 horse_no、summary_zh（一句會議結論）、buy_zh、stake_zh、view（positive、negative、none）。低信心也要寫買什麼：buy_zh 用「獨贏」或「位置Q 4-7」，不可寫「沒有建議買」。stake_zh 在低信心時寫「低信心，不落注」；差價大於 0 才寫「建議 0.4 注」。沒提到的馬不要生成。注碼只用「注」，不寫金額。
 - 另含 summary_zh/en、confidence (0~1)、data_freshness。
 
 產品腳數規則：WIN/PLA=1 匹；QIN/QPL/DBL/FCT=2 匹；TCE/TRI=3 匹；FF/QTT=4 匹。FCT/TCE/QTT 馬號順序代表名次順序。

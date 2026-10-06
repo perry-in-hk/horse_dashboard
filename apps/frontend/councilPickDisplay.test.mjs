@@ -98,3 +98,56 @@ test("horse card uses the selected round summary instead of the quote list", () 
   assert.equal(second.stake_zh, "低信心，不落注");
   assert.equal(horseNoteFor(8, { messages, roundNo: 1 }), null);
 });
+
+test("a round without saved notes still summarizes the horse and names a bet", () => {
+  const messages = [
+    {
+      role: "agent",
+      meta_json: { speaker: "quant", round_no: 7 },
+      content: "QPL 04-09 @5.0 市場機會 16.5%，差價 +2.6 個百分點。#4 升水就係條線 edge 消失。",
+    },
+    {
+      role: "agent",
+      meta_json: { speaker: "trend", round_no: 7 },
+      content: "#11 WIN 14.0 距翻案線 10.0 仍差 4.0 格，短期內唔會成立。",
+    },
+    {
+      role: "agent",
+      meta_json: { speaker: "bookie", round_no: 7, horse_notes: [] },
+      content: "暫無最終結論",
+    },
+  ];
+  const four = horseNoteFor(4, { messages, roundNo: 7 });
+  assert.match(four.summary_zh, /QPL 04-09/);
+  assert.equal(four.buy_zh, "位置Q 4-9");
+  assert.equal(four.stake_zh, "低信心，不落注");
+  const eleven = horseNoteFor(11, { messages, roundNo: 7 });
+  assert.match(eleven.summary_zh, /#11 WIN/);
+  assert.equal(eleven.buy_zh, "獨贏");
+  assert.equal(eleven.stake_zh, "低信心，不落注");
+  assert.equal(horseNoteFor(2, { messages, roundNo: 7 }), null);
+});
+
+test("a saved note that refuses a buy still names the pool discussed", () => {
+  const messages = [
+    {
+      role: "agent",
+      meta_json: {
+        speaker: "bookie",
+        round_no: 8,
+        horse_notes: [
+          { horse_no: 11, summary_zh: "距翻案線仍遠。", buy_zh: "本輪沒有建議買這匹", stake_zh: "低信心，不落注", view: "negative" },
+        ],
+      },
+    },
+    {
+      role: "agent",
+      meta_json: { speaker: "trend", round_no: 8 },
+      content: "#11 WIN 14.0 距翻案線 10.0 仍差 4.0 格。",
+    },
+  ];
+  const note = horseNoteFor(11, { messages, roundNo: 8 });
+  assert.equal(note.summary_zh, "距翻案線仍遠。");
+  assert.equal(note.buy_zh, "獨贏");
+  assert.equal(note.stake_zh, "低信心，不落注");
+});

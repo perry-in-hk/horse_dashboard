@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { COUNCIL_AGENTS } from "./src/lib/ai/council/agents.js";
-import { parseCouncilPicks } from "./src/lib/ai/council/picksSchema.js";
+import { ensureDiscussionNotes, parseCouncilPicks } from "./src/lib/ai/council/picksSchema.js";
 import {
   NO_PREOFF_QUOTE,
   buildPreOffOddsSummary,
@@ -21,6 +21,25 @@ test("recent form query keeps weight, margin, and running position inside the CT
   assert.match(cte, /mr\.declared_weight/);
   assert.match(cte, /mr\.margin/);
   assert.match(cte, /mr\.running_positions/);
+});
+
+test("a round with no horse notes still records a low-confidence buy", () => {
+  const notes = ensureDiscussionNotes(
+    [],
+    [
+      { speaker: "quant", round_no: 7, content: "QPL 04-09 @5.0，差價 +2.6 個百分點。#4 是這條線的膽。" },
+      { speaker: "trend", round_no: 7, content: "#11 WIN 14.0 距翻案線 10.0 仍遠。" },
+    ],
+    7,
+    { others: [{ product: "WIN", combo: "4", ev_status: "low_confidence", reason_zh: "低信心，不落注。" }], qpl: [] }
+  );
+  const four = notes.find((note) => note.horse_no === 4);
+  const eleven = notes.find((note) => note.horse_no === 11);
+  assert.equal(four.buy_zh, "獨贏");
+  assert.equal(four.stake_zh, "低信心，不落注");
+  assert.match(four.summary_zh, /04-09|4-9|#4/);
+  assert.equal(eleven.buy_zh, "獨贏");
+  assert.equal(eleven.stake_zh, "低信心，不落注");
 });
 
 test("lead prompt requires exactly one WIN first, then other products", () => {

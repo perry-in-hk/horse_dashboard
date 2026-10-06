@@ -235,6 +235,133 @@ export const councilPicksSchema = z.object({
     .default([]),
 });
 
+function discussionRows(messages, roundNo) {
+  const round = Number(roundNo);
+  const filterRound = Number.isFinite(round) && round > 0;
+  return (Array.isArray(messages) ? messages : []).filter((message) => {
+    const speaker = String(message?.speaker ?? message?.agent_code ?? "").toLowerCase();
+    if (speaker === "bookie" || speaker === "system" || speaker === "kelly") return false;
+    const messageRound = Number(message?.round_no ?? 0);
+    if (filterRound && messageRound !== round) return false;
+    const content = String(message?.content ?? message?.response ?? "");
+    return Boolean(content.trim()) && !content.includes("暫無最終結論");
+  });
+}
+
+function horsesMentioned(text) {
+  const found = new Set();
+  const src = String(text ?? "");
+  for (const match of src.matchAll(/#\s*(\d+)/g)) found.add(Number(match[1]));
+  for (const match of src.matchAll(/(?:^|[^\d])(\d+)\s*號/g)) found.add(Number(match[1]));
+  for (const combo of src.match(/\d+(?:\s*[-/]\s*\d+)+/g) ?? []) {
+    for (const part of combo.split(/[-/]/)) {
+      const n = Number(part.trim());
+      if (n > 0) found.add(n);
+    }
+  }
+  return [...found];
+}
+
+function comboContainingHorse(text, horseNo) {
+  const token = String(Number(horseNo));
+  for (const combo of String(text ?? "").match(/\d+(?:\s*[-/]\s*\d+)+/g) ?? []) {
+    const parts = combo.split(/[-/]/).map((part) => String(Number(part.trim())));
+    if (parts.includes(token)) return parts.join("-");
+  }
+  return "";
+}
+
+function buyFromDiscussionText(text, horseNo) {
+  const src = String(text ?? "");
+  const combo = comboContainingHorse(src, horseNo);
+  if (/位置Q|QPL/i.test(src) && combo) return `位置Q ${combo}`;
+  if (/連贏|QIN/i.test(src) && combo) return `連贏 ${combo}`;
+  if (/獨贏|WIN/i.test(src)) return "獨贏";
+  if (combo) return `位置Q ${combo}`;
+  return "獨贏";
+}
+
+function buyFromPicks(horseNo, picks) {
+  const wanted = Number(horseNo);
+  for (const row of Array.isArray(picks?.others) ? picks.others : []) {
+    if (String(row?.product ?? "").toUpperCase() !== "WIN") continue;
+    const nos = extractHorseNos(row?.combo);
+    if (nos.length === 1 && nos[0] === wanted) return "獨贏";
+  }
+  for (const row of Array.isArray(picks?.qpl) ? picks.qpl : []) {
+    const nos = extractHorseNos(row?.combo);
+    if (nos.includes(wanted)) return `位置Q ${nos.join("-")}`;
+  }
+  return "";
+}
+
+function stakeFromDiscussionText(text, picks, horseNo) {
+  const wanted = Number(horseNo);
+  const rows = [
+    ...(Array.isArray(picks?.others) ? picks.others : []),
+    ...(Array.isArray(picks?.qpl) ? picks.qpl : []),
+  ].filter((row) => extractHorseNos(row?.combo).includes(wanted));
+  for (const row of rows) {
+    if (row?.ev_status !== "positive") continue;
+    const suggested = String(row?.reason_zh ?? "").match(/建議\s*\d+(?:\.\d+)?\s*注/);
+    if (suggested) return suggested[0];
+  }
+  const src = String(text ?? "");
+  const suggested = src.match(/建議\s*\d+(?:\.\d+)?\s*注/);
+  if (suggested && !/不落注/.test(src.slice(suggested.index, suggested.index + suggested[0].length + 8))) {
+    return suggested[0];
+  }
+  return "低信心，不落注";
+}
+
+function summarySentence(text, horseNo) {
+  const parts = String(text ?? "").split(/(?<=[。！？\n])/);
+  const token = String(Number(horseNo));
+  const hit = parts.find((part) => {
+    if (part.includes(`#${token}`) || part.includes(`${token}號`)) return true;
+    return comboContainingHorse(part, horseNo) !== "";
+  });
+  const sentence = String(hit || parts[0] || "").trim();
+  return sentence.length > 180 ? `${sentence.slice(0, 180)}…` : sentence;
+}
+
+/** Fill a card for every horse this round actually discussed. Low confidence still names a pool. */
+export function ensureDiscussionNotes(existingNotes, messages, roundNo, picks = null) {
+  const notes = (Array.isArray(existingNotes) ? existingNotes : []).map((note) => ({ ...note }));
+  const byNo = new Map(notes.map((note) => [Number(note.horse_no), note]));
+  const rows = discussionRows(messages, roundNo);
+  const mentioned = new Set();
+  for (const row of rows) {
+    for (const horseNo of horsesMentioned(row.content ?? row.response)) mentioned.add(horseNo);
+  }
+  for (const horseNo of mentioned) {
+    if (!Number.isFinite(horseNo) || horseNo <= 0) continue;
+    const related = rows.filter((row) => horsesMentioned(row.content ?? row.response).includes(horseNo));
+    const text = related.map((row) => String(row.content ?? row.response ?? "")).join("\n");
+    const summary = summarySentence(text, horseNo);
+    if (!summary) continue;
+    const buy = buyFromPicks(horseNo, picks) || buyFromDiscussionText(text, horseNo);
+    const stake = stakeFromDiscussionText(text, picks, horseNo);
+    const current = byNo.get(horseNo);
+    if (!current) {
+      const note = {
+        horse_no: horseNo,
+        summary_zh: summary,
+        buy_zh: buy,
+        stake_zh: stake,
+        view: "none",
+      };
+      notes.push(note);
+      byNo.set(horseNo, note);
+      continue;
+    }
+    if (!String(current.summary_zh ?? "").trim()) current.summary_zh = summary;
+    if (!String(current.buy_zh ?? "").trim() || String(current.buy_zh).includes("沒有建議")) current.buy_zh = buy;
+    if (!String(current.stake_zh ?? "").trim()) current.stake_zh = stake;
+  }
+  return notes;
+}
+
 export function parseCouncilPicks(raw, validHorseNos = []) {
   const obj = raw && typeof raw === "object" ? raw : {};
   const rawQpl = Array.isArray(obj.qpl) ? obj.qpl : [];

@@ -24,7 +24,7 @@ export function messageMentionsHorse(text, horseNo) {
   if (hash.test(src) || hao.test(src) || ma.test(src)) return true;
   const combos = src.match(/\d+(?:\s*[-/]\s*\d+)+/g) ?? [];
   for (const combo of combos) {
-    const parts = combo.split(/[-/]/).map((part) => part.trim());
+    const parts = combo.split(/[-/]/).map((part) => String(Number(part.trim())));
     if (parts.includes(token)) return true;
   }
   return false;
@@ -106,6 +106,78 @@ export function listRoundNumbers(messages) {
   return [...seen].sort((a, b) => a - b);
 }
 
+function isMissingBuy(buy) {
+  const text = String(buy ?? "").trim();
+  return !text || text.includes("沒有建議");
+}
+
+function discussionMessages(messages, roundNo) {
+  const round = Number(roundNo);
+  const filterRound = Number.isFinite(round) && round > 0;
+  return (messages ?? []).filter((message) => {
+    const meta = message?.meta_json ?? {};
+    const speaker = String(meta.speaker || meta.agent_code || "").toLowerCase();
+    if (speaker === "bookie" || speaker === "system" || speaker === "kelly") return false;
+    const messageRound = Number(meta.round_no ?? 0);
+    if (filterRound && messageRound !== round) return false;
+    const content = String(message?.content ?? "");
+    if (!content.trim() || content.includes("暫無最終結論")) return false;
+    return true;
+  });
+}
+
+function comboContaining(text, horseNo) {
+  const token = String(Number(horseNo));
+  const combos = String(text ?? "").match(/\d+(?:\s*[-/]\s*\d+)+/g) ?? [];
+  for (const combo of combos) {
+    const parts = combo.split(/[-/]/).map((part) => String(Number(part.trim())));
+    if (parts.includes(token)) return parts.join("-");
+  }
+  return "";
+}
+
+function buyFromDiscussion(text, horseNo) {
+  const src = String(text ?? "");
+  const combo = comboContaining(src, horseNo);
+  if (/位置Q|QPL/i.test(src) && combo) return `位置Q ${combo}`;
+  if (/連贏|QIN/i.test(src) && combo) return `連贏 ${combo}`;
+  if (/獨贏|WIN/i.test(src)) return "獨贏";
+  if (combo) return `位置Q ${combo}`;
+  return "獨贏";
+}
+
+function stakeFromDiscussion(text) {
+  const src = String(text ?? "");
+  const suggested = src.match(/建議\s*\d+(?:\.\d+)?\s*注/);
+  if (suggested && !/不落注/.test(src.slice(suggested.index, suggested.index + suggested[0].length + 8))) {
+    return suggested[0];
+  }
+  return "低信心，不落注";
+}
+
+function viewFromDiscussion(text) {
+  const tone = toneScore(text);
+  if (tone.neg > tone.pos) return "negative";
+  if (tone.pos > tone.neg) return "positive";
+  return "none";
+}
+
+function noteFromDiscussion(horseNo, messages, roundNo) {
+  const rows = discussionMessages(messages, roundNo).filter((message) =>
+    messageMentionsHorse(message.content, horseNo)
+  );
+  const sentences = rows.map((message) => extractMention(message.content, horseNo)).filter(Boolean);
+  if (!sentences.length) return null;
+  const text = sentences.join(" ");
+  return {
+    horse_no: Number(horseNo),
+    summary_zh: clip(sentences[0], 180),
+    buy_zh: buyFromDiscussion(text, horseNo),
+    stake_zh: stakeFromDiscussion(text),
+    view: viewFromDiscussion(text),
+  };
+}
+
 /** positive | negative | none. none is no discussion, or discussion without a clear view. */
 export function horseNoteFor(horseNo, { messages, picks, roundNo } = {}) {
   const wanted = Number(horseNo);
@@ -128,7 +200,16 @@ export function horseNoteFor(horseNo, { messages, picks, roundNo } = {}) {
       notes = Array.isArray(picks?.horse_notes) ? picks.horse_notes : [];
     }
   }
-  return notes.find((note) => Number(note?.horse_no) === wanted) ?? null;
+  const stored = notes.find((note) => Number(note?.horse_no) === wanted) ?? null;
+  const discussed = noteFromDiscussion(wanted, messages, filterRound ? round : undefined);
+  if (!stored) return discussed;
+  if (!discussed) return stored;
+  return {
+    ...stored,
+    summary_zh: stored.summary_zh || discussed.summary_zh,
+    buy_zh: isMissingBuy(stored.buy_zh) ? discussed.buy_zh : stored.buy_zh,
+    stake_zh: stored.stake_zh || discussed.stake_zh,
+  };
 }
 
 export function horseNameView(quotes) {

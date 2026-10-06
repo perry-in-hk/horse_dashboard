@@ -1,6 +1,6 @@
 import { COUNCIL_AGENTS, COUNCIL_AGENT_ORDER, STAGE2_REVIEW_PROMPT } from "./agents.js";
 import { callAgentChat } from "./callAgent.js";
-import { parseCouncilPicks } from "./picksSchema.js";
+import { ensureDiscussionNotes, parseCouncilPicks } from "./picksSchema.js";
 import { formatHktDateTime, toUtcIso } from "../../timeHkt.js";
 import { NO_PREOFF_QUOTE, formatFormHorseLine, formatRunnerLine } from "../councilPacket.js";
 
@@ -557,7 +557,7 @@ function buildBookieRoundPrompt({
     `combo 只能使用本場合法馬號：${(validHorseNos ?? []).join(", ") || "(見 RunnersTable)"}。`,
     "qpl 三筆 combo 不可重複。第一筆是主位置Q，reason_zh 要寫兩匹都入位置的機會、位置Q賠率、扣約 17.5% 抽成後的市場機會、差價。差價不大於 0 就 ev_status=low_confidence，結尾「低信心，不落注。」",
     "獨贏 reason_zh 要寫贏面、獨贏賠率、扣抽成後市場、差價，並提到騎師、檔位或場地。不夠就 low_confidence，注碼 0，但馬號仍然要留。",
-    "沒有算過差價不得標 positive。horse_notes 只列本輪發言提到的馬：summary_zh、buy_zh（獨贏或位置Q 組合）、stake_zh、view。",
+    "沒有算過差價不得標 positive。horse_notes 必須覆蓋本輪發言提到的每一匹馬。低信心也要寫 buy_zh（獨贏或位置Q 4-7），不可寫「沒有建議買」。stake_zh 寫「低信心，不落注」。",
     "others 需 4-5 筆、每筆 product 不同，覆蓋至少 4 種產品（WIN/PLA/QIN/FCT/TCE/TRI/FF/QTT/DBL 中挑選）；腳數：WIN/PLA=1、QIN/QPL/DBL/FCT=2、TCE/TRI=3、FF/QTT=4；FCT/TCE/QTT 順序即名次。",
     "member_verdicts 必須涵蓋本輪每位有發言的成員；重複舊內容或空白發言一律 reject。",
     "同一爭議持續兩輪以上必須在 ruling_zh 裁決站邊，並寫明翻案條件；已裁決議題不得重開。",
@@ -827,6 +827,12 @@ export async function runCouncilChatroomRound(input) {
   if (roundSummaryEn && (!picksParsed.success || !String(currentPicks.summary_en ?? "").trim())) {
     currentPicks.summary_en = roundSummaryEn;
   }
+  currentPicks.horse_notes = ensureDiscussionNotes(
+    currentPicks.horse_notes,
+    workingTranscript,
+    roundNo,
+    currentPicks
+  );
   const nextSequence = normalizeSequence(bookieObj?.next_sequence);
   const userDisposition = normalizeUserDisposition(bookieObj?.user_disposition);
   const isFinal = Boolean(bookieObj?.is_final) || shouldFinalize;
