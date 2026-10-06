@@ -79,9 +79,55 @@ export function followOnLines(picks) {
   return lines;
 }
 
-export function commentsForHorse(horseNo, { messages, picks } = {}) {
+const NEGATIVE_VIEWS = ["不看好", "唔看好", "不支持", "不保留", "降權", "減分", "剔除", "否決", "駁回", "陷阱", "過熱", "避開", "放棄", "風險過高", "劣勢", "不建議", "負面"];
+const POSITIVE_VIEWS = ["升權", "加分", "看好", "優勢", "保留", "被低估", "低估", "可信", "支持", "值博", "正面"];
+
+function toneScore(text) {
+  let src = String(text ?? "");
+  let pos = 0;
+  let neg = 0;
+  for (const word of NEGATIVE_VIEWS) {
+    if (!src.includes(word)) continue;
+    neg += 1;
+    src = src.split(word).join("");
+  }
+  for (const word of POSITIVE_VIEWS) {
+    if (src.includes(word)) pos += 1;
+  }
+  return { pos, neg };
+}
+
+export function listRoundNumbers(messages) {
+  const seen = new Set();
+  for (const message of messages ?? []) {
+    const n = Number(message?.meta_json?.round_no ?? 0);
+    if (n > 0) seen.add(n);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+/** positive | negative | none. none is no discussion, or discussion without a clear view. */
+export function horseNameView(quotes) {
+  let pos = 0;
+  let neg = 0;
+  for (const quote of quotes ?? []) {
+    const ev = String(quote?.ev_status ?? "").toLowerCase();
+    if (ev === "negative") neg += 2;
+    else if (ev === "positive") pos += 2;
+    const tone = toneScore(quote?.text);
+    pos += tone.pos;
+    neg += tone.neg;
+  }
+  if (neg > pos) return "negative";
+  if (pos > neg) return "positive";
+  return "none";
+}
+
+export function commentsForHorse(horseNo, { messages, picks, roundNo } = {}) {
   const quotes = [];
   const seen = new Set();
+  const wantedRound = Number(roundNo);
+  const filterRound = Number.isFinite(wantedRound) && wantedRound > 0;
   const push = (quote) => {
     const key = `${quote.kind}|${quote.product || ""}|${quote.text}`;
     if (!quote.text || seen.has(key)) return;
@@ -94,11 +140,14 @@ export function commentsForHorse(horseNo, { messages, picks } = {}) {
     push({
       kind: "pick",
       product: String(row.product || "").toUpperCase(),
+      ev_status: String(row.ev_status ?? "").toLowerCase(),
       speaker: "",
       text,
     });
   }
   for (const message of messages ?? []) {
+    const messageRound = Number(message?.meta_json?.round_no ?? 0);
+    if (filterRound && messageRound !== wantedRound) continue;
     const content = String(message?.content ?? "");
     if (!messageMentionsHorse(content, horseNo)) continue;
     const text = extractMention(content, horseNo);

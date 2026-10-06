@@ -580,10 +580,24 @@ export default function AiRecommendation() {
       return;
     }
     if (ev.type === "session_state") {
-      const status = ev.status as Record<string, unknown> | undefined;
-      if (status) {
+      const rawStatus = ev.status;
+      // Start/stop emit status as "running" | "stopped". That is this race's
+      // meeting, not the day-level auto-start toggle.
+      if (typeof rawStatus === "string") {
+        if (rawStatus === "stopped") {
+          setCadence((prev) => ({ ...prev, sessionRunning: false, runningRound: false }));
+          setSessionStateText(dayAutoStart ? "會議已暫停 · 全日自動開會仍啟用" : "會議已暫停");
+        } else if (rawStatus === "running") {
+          setCadence((prev) => ({ ...prev, sessionRunning: true }));
+          setSessionStateText((prev) => (prev.startsWith("會議進行中") ? prev : "會議進行中"));
+        }
+        if (ev.picks && typeof ev.picks === "object") setPicks(ev.picks as CouncilPicks);
+        return;
+      }
+      const status = rawStatus as Record<string, unknown> | undefined;
+      if (status && typeof status === "object") {
         setSessionStateText(formatSessionStateText(status));
-        setDayAutoStart(Boolean(status.activated_date));
+        if (typeof status.activated_date === "boolean") setDayAutoStart(status.activated_date);
         setCadence(cadenceFromStatus(status));
         const gap = readRoundGapFromStatus(status);
         setRoundGapSeconds(gap.gapSeconds);
@@ -671,7 +685,7 @@ export default function AiRecommendation() {
       setDayAutoStart(activated);
       setSessionStateText(activated ? "全日自動開會已啟用 · 等待會議開始" : "全日自動開會已關閉");
     }
-  }, [sessionId]);
+  }, [sessionId, dayAutoStart]);
 
   useEffect(() => {
     const pending = ws.events.filter((ev) => ev._seq > wsEventCursorRef.current);

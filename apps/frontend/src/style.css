@@ -2719,7 +2719,20 @@ body {
 .ai-field-win-reason { color: var(--text-secondary); }
 .ai-field-empty { margin: 8px 0; color: var(--text-muted); }
 .ai-field-follow { margin: 0 0 8px; padding-left: 18px; font-size: 13px; }
-.ai-field-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 8px; }
+.ai-field-cards-wrap { margin-top: 8px; }
+.ai-field-round { display: flex; flex-direction: column; gap: 4px; max-width: 160px; margin-bottom: 8px; }
+.ai-field-round select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.ai-field-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.ai-horse-name.is-positive { color: var(--success); }
+.ai-horse-name.is-negative { color: var(--danger); }
+.ai-horse-name.is-none { color: var(--text-primary); }
 .ai-horse-card { border: 1px solid var(--border-medium); border-radius: 12px; padding: 10px 12px; background: var(--bg-overlay); }
 .ai-horse-card.is-suggestion { border-color: var(--color-accent, var(--border-strong)); }
 .ai-horse-card header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

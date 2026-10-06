@@ -5,6 +5,8 @@ import {
   NOT_MENTIONED,
   commentsForHorse,
   followOnLines,
+  horseNameView,
+  listRoundNumbers,
   messageMentionsHorse,
   winSuggestion,
 } from "./src/lib/councilPickDisplay.js";
@@ -47,4 +49,20 @@ test("horse cards quote only tied mentions and otherwise stay empty", () => {
   assert.ok(four.some((quote) => quote.kind === "transcript" && quote.text.includes("同場地")));
   assert.equal(commentsForHorse(2, { messages, picks }).length, 0);
   assert.equal(NOT_MENTIONED, "未提過");
+});
+
+test("horse cards follow the selected round and color the name by view", () => {
+  const messages = [
+    { role: "agent", meta_json: { speaker: "historian", round_no: 1 }, content: "#4 升權，同場地有優勢。" },
+    { role: "agent", meta_json: { speaker: "scout", round_no: 1 }, content: "#8 剔除，過熱。" },
+    { role: "agent", meta_json: { speaker: "historian", round_no: 2 }, content: "#4 降權，陷阱。" },
+  ];
+  assert.deepEqual(listRoundNumbers(messages), [1, 2]);
+  const round1 = commentsForHorse(4, { messages, roundNo: 1 });
+  const round2 = commentsForHorse(4, { messages, roundNo: 2 });
+  assert.equal(horseNameView(round1), "positive");
+  assert.equal(horseNameView(round2), "negative");
+  assert.equal(horseNameView(commentsForHorse(2, { messages, roundNo: 1 })), "none");
+  assert.equal(horseNameView(commentsForHorse(8, { messages, roundNo: 1 })), "negative");
+  assert.equal(commentsForHorse(4, { messages, roundNo: 1 }).some((quote) => quote.text.includes("降權")), false);
 });

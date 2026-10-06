@@ -15,15 +15,30 @@ export function followOnLines(picks: {
   qpl?: { combo?: string; reason_zh?: string; reason_en?: string; product?: string }[];
 } | null | undefined): { product: string; combo: string; reason: string }[];
 
-export type HorseQuote = { kind: "pick" | "transcript"; product: string; speaker: string; text: string };
+export type HorseQuote = {
+  kind: "pick" | "transcript";
+  product: string;
+  speaker: string;
+  text: string;
+  ev_status?: string;
+};
+
+export type HorseNameView = "positive" | "negative" | "none";
+
+export function listRoundNumbers(
+  messages?: { meta_json?: Record<string, unknown> }[]
+): number[];
+
+export function horseNameView(quotes?: HorseQuote[]): HorseNameView;
 
 export function commentsForHorse(
   horseNo: number,
   input?: {
     messages?: { content?: string; role?: string; meta_json?: Record<string, unknown> }[];
     picks?: {
-      others?: { product?: string; combo?: string; reason_zh?: string; reason_en?: string }[];
-      qpl?: { combo?: string; reason_zh?: string; reason_en?: string; product?: string }[];
+      others?: { product?: string; combo?: string; reason_zh?: string; reason_en?: string; ev_status?: string }[];
+      qpl?: { combo?: string; reason_zh?: string; reason_en?: string; product?: string; ev_status?: string }[];
     } | null;
+    roundNo?: number;
   }
 ): HorseQuote[];

@@ -5,6 +5,8 @@ import {
   NOT_MENTIONED,
   commentsForHorse,
   followOnLines,
+  horseNameView,
+  listRoundNumbers,
   winSuggestion,
 } from "../lib/councilPickDisplay.js";
 
@@ -59,6 +61,34 @@ function runnerName(runners: CardRunner[], horseNo: number): string {
   return runners.find((runner) => runner.no === horseNo)?.name || "";
 }
 
+function roundStorageKey(meetingDate: string, venueCode: string, raceNo: number): string {
+  return `hkjc.aiHorseRound:${meetingDate}:${venueCode}:${raceNo}`;
+}
+
+function readChosenRound(meetingDate: string, venueCode: string, raceNo: number): number {
+  try {
+    const raw = localStorage.getItem(roundStorageKey(meetingDate, venueCode, raceNo));
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as { round?: number; chosen?: boolean };
+    if (!parsed?.chosen) return 0;
+    const n = Number(parsed.round);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeChosenRound(meetingDate: string, venueCode: string, raceNo: number, roundNo: number) {
+  try {
+    localStorage.setItem(
+      roundStorageKey(meetingDate, venueCode, raceNo),
+      JSON.stringify({ round: roundNo, chosen: true })
+    );
+  } catch {
+    /* private mode or full storage */
+  }
+}
+
 export default function AiRaceField({
   meetingDate,
   venueCode,
@@ -90,6 +120,7 @@ export default function AiRaceField({
   const [runners, setRunners] = useState<CardRunner[]>([]);
   const [runnersNote, setRunnersNote] = useState<string | null>(null);
   const [runnersLoading, setRunnersLoading] = useState(false);
+  const [selectedRound, setSelectedRound] = useState(0);
 
   useEffect(() => {
     if (!meetingDate || !venueCode) {
@@ -185,6 +216,23 @@ export default function AiRaceField({
       ? `賽日 ${meetingDate} · ${venueName(venueCode)}（今日）`
       : `今日沒有選中的賽事，現正顯示 ${meetingDate} · ${venueName(venueCode)}`;
 
+  const rounds = useMemo(() => listRoundNumbers(messages), [messages]);
+  const latestRound = rounds.length ? rounds[rounds.length - 1] : 0;
+
+  useEffect(() => {
+    if (!rounds.length) {
+      setSelectedRound(0);
+      return;
+    }
+    const chosen = readChosenRound(meetingDate, venueCode, raceNo);
+    setSelectedRound(rounds.includes(chosen) ? chosen : latestRound);
+  }, [rounds, latestRound, meetingDate, venueCode, raceNo]);
+
+  const chooseRound = (roundNo: number) => {
+    setSelectedRound(roundNo);
+    writeChosenRound(meetingDate, venueCode, raceNo, roundNo);
+  };
+
   const picksFor = (n: number): PickBlob | null => {
     if (n === raceNo && livePicks) return livePicks;
     return stored[n] ?? null;
@@ -254,20 +302,41 @@ export default function AiRaceField({
                   </ul>
                 ) : null}
                 {open ? (
+                  <div className="ai-field-cards-wrap">
+                    <label className="ai-field-round">
+                      <span className="field-label">回合</span>
+                      <select
+                        value={rounds.length ? selectedRound : ""}
+                        disabled={!rounds.length}
+                        onChange={(e) => chooseRound(Number(e.target.value))}
+                      >
+                        {rounds.length ? (
+                          rounds.map((round) => (
+                            <option key={round} value={round}>
+                              第 {round} 輪
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">未有回合</option>
+                        )}
+                      </select>
+                    </label>
                   <div className="ai-field-cards" aria-label={`第 ${n} 場全場`}>
                     {runnersLoading ? <p className="muted">載入排位…</p> : null}
                     {runnersNote ? <p className="muted">{runnersNote}</p> : null}
                     {fieldRunners.map((runner) => {
                       const quotes = commentsForHorse(runner.no, {
                         messages: open ? messages : [],
-                        picks,
+                        picks: !rounds.length || selectedRound === latestRound ? picks : null,
+                        roundNo: rounds.length ? selectedRound : undefined,
                       });
+                      const view = horseNameView(quotes);
                       const suggested = win?.horseNo === runner.no;
                       return (
                         <article key={runner.no} className={`ai-horse-card ${suggested ? "is-suggestion" : ""}`}>
                           <header>
                             <span className="ai-horse-no">#{runner.no}</span>
-                            <strong>{runner.name || "—"}</strong>
+                            <strong className={`ai-horse-name is-${view}`}>{runner.name || "—"}</strong>
                             {suggested ? <span className="ai-horse-badge">建議</span> : null}
                           </header>
                           <p className="ai-horse-meta">
@@ -290,6 +359,7 @@ export default function AiRaceField({
                         </article>
                       );
                     })}
+                  </div>
                   </div>
                 ) : null}
               </article>
